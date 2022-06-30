@@ -1,0 +1,230 @@
+package com.slamdh.apiserver.controller;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseBody;
+
+import com.slamdh.apiserver.service.DetailService;
+
+@Controller
+public class DetailController {
+	
+	static final Logger logger = LoggerFactory.getLogger(DetailController.class);
+	
+	@Autowired
+	DetailService detailService;
+
+	@RequestMapping({"/api/detail/anomaly/chart"})
+	@ResponseBody
+	Map<String, Object> anomalyChart(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		
+		return detailService.getAnomalyChart(params);
+		
+	}
+	
+	@RequestMapping({"/api/detail/anomaly/count"})
+	@ResponseBody
+	Map<String, Object> anomalyCount(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String type = request.getParameter("type");
+		params.put("type", type);
+		return detailService.getAnomalyCount(params);
+		
+	}
+	
+	@RequestMapping({"/api/detail/anomaly/list"})
+	@ResponseBody
+	ArrayList<Map<String, Object>> anomalyList(HttpServletRequest request, HttpServletResponse response) {
+		Map<String, Object> params = new HashMap<String, Object>();
+		String type = request.getParameter("type");
+		String page = request.getParameter("page");
+		params.put("type", type);
+		params.put("page", page);
+		
+		return detailService.getAnomalyList(params);
+		
+	}
+	
+	@RequestMapping({"/api/detail/violation/count"})
+	@ResponseBody
+	ArrayList<Map<String, Object>> violationCount(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		
+		return detailService.getViolationCount(params);
+	}
+	
+	@RequestMapping({"/api/detail/violation/list/count"})
+	@ResponseBody
+	Map<String, Object> violationListCount(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String type = request.getParameter("violationType");
+		params.put("type", type);
+		return detailService.getViolationListCount(params);
+	}
+	
+	@RequestMapping({"/api/detail/violation/list"})
+	@ResponseBody
+	ArrayList<Map<String, Object>> violationList(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String type = request.getParameter("violationType");
+		String page = request.getParameter("page");
+		params.put("type", type);
+		params.put("page", page);
+		
+		return detailService.getViolationList(params);
+	}
+	
+	@RequestMapping({"/api/detail/outflow/chart"})
+	@ResponseBody
+	Map<String, Object> outflowChart(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		
+		return detailService.getOutflowChart(params);
+		
+	}
+	
+	@RequestMapping({"/api/detail/outflow/count"})
+	@ResponseBody
+	Map<String, Object> outflowCount(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		
+		return detailService.getOutflowCount(params);
+		
+	}
+	
+	@RequestMapping({"/api/detail/outflow/list"})
+	@ResponseBody
+	ArrayList<Map<String, Object>> outflowList(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String page = request.getParameter("page");
+		params.put("page", page);
+		
+		return detailService.getOutflowList(params);
+	}
+	
+	@RequestMapping({"/api/detail/event/association"})
+	@ResponseBody
+	Map<String, Object> eventAssociation(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> result = new HashMap<String, Object>();
+		Map<String, Object> params = new HashMap<String, Object>();
+		String md5 = request.getParameter("md5");
+		String agentId = request.getParameter("agentId");
+		boolean isFile = Boolean.parseBoolean(request.getParameter("isFile").toString());
+		String fileName = request.getParameter("fileName");
+		String filePath = request.getParameter("filePath");
+		String pid = request.getParameter("pid");
+		String appName = request.getParameter("appName");
+		
+		params.put("md5", md5);
+		params.put("agentId", agentId);
+		params.put("fileName", fileName);
+		params.put("filePath", filePath);
+		params.put("pid", pid);
+		params.put("appName", appName);
+		
+		System.out.println("=========================================");
+		System.out.println(md5);
+		System.out.println(agentId);
+		System.out.println(isFile);
+		System.out.println(fileName);
+		System.out.println(filePath);
+		System.out.println(pid);
+		System.out.println("=========================================");
+		
+		//파일
+		if(isFile) {
+			result = detailService.getFileEventAssociation(params);
+		} else { //프로세스
+			result = detailService.getProcessEventAssociation(params);
+		}
+		
+		try {
+			
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		return result;
+		
+	}
+	
+	@RequestMapping({"/api/detail/event/timeline"})
+	@ResponseBody
+	ArrayList<Map<String, Object>> eventTimeline(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String agentId = request.getParameter("agentId");
+		String date = request.getParameter("date");
+		params.put("agentId", agentId);
+		params.put("date", date);
+		
+		return detailService.getEventTimeline(params);
+		
+	}
+	
+//	@RequestMapping({"/api/detail/event/relation"})
+//	@ResponseBody
+//	Map<String, Object> eventRelation(HttpServletRequest request, HttpServletResponse response) {
+//		
+//		Map<String, Object> params = new HashMap<String, Object>();
+//		String srchCondition = request.getParameter("srchCondition");
+//		String eventType = request.getParameter("eventType");
+//		params.put("srchCondition", srchCondition);
+//		params.put("eventType", eventType);
+//		
+//		return detailService.getEventRelation(params);
+//		
+//	}
+	
+	
+	@RequestMapping({"/api/detail/event/detail/count"})
+	@ResponseBody
+	Map<String, Object> eventDetailCount(HttpServletRequest request, HttpServletResponse response) {
+		Map<String, Object> params = new HashMap<String, Object>();
+		String agentId = request.getParameter("agentId");
+		String selectDate = request.getParameter("selectDate");
+		params.put("agentId", agentId);
+		params.put("selectDate", selectDate);
+		return detailService.getEventDetailCount(params);
+	}
+	
+	
+	@RequestMapping({"/api/detail/event/detail"})
+	@ResponseBody
+	ArrayList<Map<String, Object>> eventDetail(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String agentId = request.getParameter("agentId");
+		String selectDate = request.getParameter("selectDate");
+		String page = request.getParameter("page");
+		params.put("agentId", agentId);
+		params.put("selectDate", selectDate);
+		params.put("page", page);
+		
+		return detailService.getEventDetail(params);
+		
+	}
+	
+	
+	
+}

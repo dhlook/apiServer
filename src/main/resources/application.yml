@@ -1,0 +1,42 @@
+spring:
+  datasource:
+    driver-class-name: org.mariadb.jdbc.Driver
+    url: jdbc:mysql://127.0.0.1:5100/apiserver?useUnicode=true&characterEncoding=utf-8    
+    username: apiserver
+    password: 'passwd#123'
+
+  data:
+    elasticsearch:
+      hosts: 127.0.0.1
+      port: 9200
+      index: apiserver-
+      type: apiserver_type
+      
+
+  mvc:
+    view:
+      prefix: /WEB-INF/jsp/
+      suffix: .jsp
+    locale: ko_KR
+
+  resources:
+    chain:
+      cache: true 
+      
+  messages:
+    basename: classpath:/messages/message
+    encoding: UTF-8
+    cache-seconds: -1
+    
+logging:
+  level:
+    com.demo: debug
+    
+application:
+    security:
+        jwt:
+            secret: apiserversecretkey
+            token-validity-in-seconds: 1800000
+            token-validity-in-seconds-for-remember-me: 2592000
+            
+

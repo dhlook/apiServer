@@ -1,0 +1,928 @@
+package com.slamdh.apiserver.service;
+
+import static org.elasticsearch.index.query.QueryBuilders.queryStringQuery;
+
+import java.io.BufferedReader;
+import java.io.BufferedWriter;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.io.OutputStreamWriter;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+
+import org.apache.commons.codec.binary.Base64;
+import org.apache.commons.lang3.StringUtils;
+import org.elasticsearch.action.search.SearchRequest;
+import org.elasticsearch.action.search.SearchResponse;
+import org.elasticsearch.client.RestHighLevelClient;
+import org.elasticsearch.index.query.BoolQueryBuilder;
+import org.elasticsearch.index.query.Operator;
+import org.elasticsearch.index.query.QueryBuilders;
+import org.elasticsearch.index.query.QueryStringQueryBuilder;
+import org.elasticsearch.script.Script;
+import org.elasticsearch.script.ScriptType;
+import org.elasticsearch.search.SearchHit;
+import org.elasticsearch.search.aggregations.AggregationBuilders;
+import org.elasticsearch.search.aggregations.BucketOrder;
+import org.elasticsearch.search.aggregations.bucket.filter.Filter;
+import org.elasticsearch.search.aggregations.bucket.filter.FilterAggregationBuilder;
+import org.elasticsearch.search.aggregations.bucket.histogram.DateHistogramAggregationBuilder;
+import org.elasticsearch.search.aggregations.bucket.histogram.DateHistogramInterval;
+import org.elasticsearch.search.aggregations.bucket.histogram.Histogram;
+import org.elasticsearch.search.aggregations.bucket.terms.Terms;
+import org.elasticsearch.search.aggregations.bucket.terms.Terms.Bucket;
+import org.elasticsearch.search.aggregations.bucket.terms.TermsAggregationBuilder;
+import org.elasticsearch.search.aggregations.metrics.sum.Sum;
+import org.elasticsearch.search.aggregations.metrics.tophits.TopHits;
+import org.elasticsearch.search.builder.SearchSourceBuilder;
+import org.elasticsearch.search.fetch.subphase.highlight.HighlightBuilder;
+import org.elasticsearch.search.fetch.subphase.highlight.HighlightField;
+import org.elasticsearch.search.sort.SortOrder;
+import org.json.simple.JSONArray;
+import org.json.simple.JSONObject;
+import org.json.simple.parser.JSONParser;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import com.slamdh.apiserver.AppName;
+import com.slamdh.apiserver.Constants;
+import com.slamdh.apiserver.ElasticsearchConfiguration;
+import com.slamdh.apiserver.mapper.AgentMapper;
+import com.slamdh.apiserver.mapper.CustomMapper;
+import com.slamdh.apiserver.mapper.PolicyMapper;
+import com.slamdh.apiserver.utils.CommonUtils;
+import com.google.gson.Gson;
+
+@Service
+public class PrintModuleService extends CommonService {
+
+	static final Logger logger = LoggerFactory.getLogger(PrintModuleService.class);
+	
+	@Autowired
+	ElasticsearchConfiguration esConfig;
+	@Autowired
+	AgentMapper agentMapper;
+	@Autowired
+	PolicyMapper policyMapper;
+	@Autowired
+	CustomMapper customMapper;
+	
+	@Value("${spring.data.elasticsearch.index}")
+	String index;
+	@Value("${spring.data.elasticsearch.type}")
+	String type;
+	@Value("${spring.data.elasticsearch.hosts}")
+    private String hosts;
+    @Value("${spring.data.elasticsearch.port}")
+    private int port;
+
+	public Map<String, Object> getDashBoard(Map<String, Object> param) {
+
+		Map<String, Object> resultMap = new HashMap<String, Object>();
+		
+		String customId = (String)param.get("customId");
+		String startTime = (String)param.get("startTime");
+		String endTime = (String)param.get("endTime");
+		String startHour = startTime.split(":")[0];
+		String startMin = startTime.split(":")[1];
+		String endHour = endTime.split(":")[0];
+		String endMin = endTime.split(":")[1];
+		
+		try {
+			//db조회
+			Map<String, Object> policyApply = agentMapper.getPolicyApplyAgentCount(customId);
+			
+			String script = "int time = Integer.parseInt(doc.logDate.value.toString('HHmm')); time >= "+startHour+startMin+" && time <= " + endHour+endMin;
+			
+			
+			BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+			boolQuery.must(QueryBuilders.termQuery("customerId", customId));
+			boolQuery.must(QueryBuilders.termQuery("appName", AppName.REALTIME_FILE_LOG));
+	//		boolQuery.must(QueryBuilders.termQuery("outflowType", 3));
+	//		boolQuery.must(QueryBuilders.rangeQuery("logDate").gte("now-7d/d"));
+			
+			TermsAggregationBuilder top5Aggs = AggregationBuilders.terms("top5").field("agentId").order(BucketOrder.key(false)).size(5)
+					.subAggregation(AggregationBuilders.topHits("agentName").size(1).fetchSource(new String[] {"agentName", "agentDeptName"}, null))
+					.subAggregation(AggregationBuilders.filter("dwg", QueryBuilders.termQuery("ext", "dwg")))
+					.subAggregation(AggregationBuilders.sum("pe").field("peCnt"))
+					.subAggregation(AggregationBuilders.sum("keyword").field("keywordCnt"));
+			
+			FilterAggregationBuilder workAggs = AggregationBuilders.filter("work", QueryBuilders.scriptQuery(new Script(ScriptType.INLINE, "painless", script, Collections.emptyMap())));		
+			
+			DateHistogramAggregationBuilder graphAggs = AggregationBuilders.dateHistogram("graph").field("logDate").dateHistogramInterval(DateHistogramInterval.DAY).format("MM.dd")
+					.subAggregation(AggregationBuilders.filter("dwg", QueryBuilders.termQuery("ext", "dwg")))
+					.subAggregation(AggregationBuilders.sum("peCnt").field("peCnt"))
+					.subAggregation(AggregationBuilders.filter("allow", QueryBuilders.termQuery("isBlock", "0")));
+			
+			
+			RestHighLevelClient client = esConfig.getRestClient();
+			SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder()
+				.query(boolQuery).aggregation(top5Aggs).aggregation(workAggs).aggregation(graphAggs).size(0);
+				
+			
+			SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+			
+			SearchResponse searchResponse = new SearchResponse();
+			try {
+				searchResponse = client.search(searchRequest);
+			} catch(Exception e) {
+				logger.info(e.getMessage());
+			}
+			
+			long totalCnt = searchResponse.getHits().totalHits;
+			
+			Filter work = searchResponse.getAggregations().get("work");
+			Terms top5 = searchResponse.getAggregations().get("top5");
+			Histogram graph = searchResponse.getAggregations().get("graph");
+			
+			// TOP5 목록
+			ArrayList<HashMap<String, Object>> topList = new ArrayList<HashMap<String, Object>>();
+			for(Bucket b : top5.getBuckets()) {
+				HashMap<String, Object> map = new HashMap<String, Object>();
+				
+				TopHits topHit = b.getAggregations().get("agentName");
+				for(SearchHit hit : topHit.getHits()) {
+					map.put("agentName", hit.getSourceAsMap().get("agentName"));
+					map.put("agentDeptName", hit.getSourceAsMap().get("agentDeptName"));
+				}
+				
+				Sum pe = b.getAggregations().get("pe");
+				Filter dwg = b.getAggregations().get("dwg");
+				Sum keyword = b.getAggregations().get("keyword");
+				
+				map.put("totalCnt", b.getDocCount());
+				map.put("peCnt", pe.getValue());
+				map.put("dwgCnt", dwg.getDocCount());
+				map.put("keywordCnt", keyword.getValue());
+				topList.add(map);
+				
+			}
+			
+			// 그래프 데이터
+			ArrayList<HashMap<String, Object>> graphList = new ArrayList<HashMap<String, Object>>();
+			for (Histogram.Bucket b : graph.getBuckets()) {
+				HashMap<String, Object> map = new HashMap<String, Object>();
+				
+				Filter dwg = b.getAggregations().get("dwg");
+				Sum pe = b.getAggregations().get("peCnt");
+				Filter allow = b.getAggregations().get("allow");
+	
+				map.put("key", b.getKeyAsString());
+				map.put("dwg", dwg.getDocCount());
+				map.put("pe", pe.getValue());
+				map.put("allow", allow.getDocCount());
+				graphList.add(map);
+			}
+			
+			resultMap.put("policyApply", policyApply);
+			resultMap.put("totalCnt", totalCnt);
+			resultMap.put("workHourCnt", work.getDocCount());		
+			resultMap.put("topList", topList);
+			resultMap.put("graph", graphList);
+			
+		} catch (Exception e) {
+			logger.info(e.getMessage());
+		}
+			
+		
+		return resultMap;
+	}
+	
+	
+	public ArrayList<Map<String, Object>> getPolicyList(Map<String, Object> param) {
+		
+		ArrayList<Map<String, Object>> resultList = new ArrayList<Map<String, Object>>();
+		
+		try {
+			resultList = policyMapper.getPolicyList(param);
+		} catch (Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		return resultList;
+	}
+	
+	
+	@SuppressWarnings("unchecked")
+	public String getAgentGroupList(Map<String, Object> param) {
+		
+		JSONObject jsonObj = new JSONObject();
+		
+		try {
+			ArrayList<Map<String, Object>> groupList = customMapper.getGroupList(param);
+			ArrayList<Map<String, Object>> agentList = agentMapper.getAgentPolicyList(param);
+			
+			
+			for(Map<String, Object> m : groupList) {
+				int tmpGroupDepth = Integer.parseInt(m.get("groupDepth").toString());
+				if(tmpGroupDepth == 1){
+					String tmpGroupId = m.get("groupId").toString();
+					jsonObj.put("data", m);
+					jsonObj.put("expanded", true);
+	 				
+					// 자식 노드가 있을 경우 재귀함수 호출
+					if(hasChild(groupList, tmpGroupId)){
+						JSONArray childArr = groupListToJson(groupList, agentList, tmpGroupId, tmpGroupDepth + 1);
+
+						//그룹에 속한 에이전트를 추가
+						for(Map<String, Object> agent : agentList) {
+							if(agent.get("groupId") != null) {
+								String agentGroupId = agent.get("groupId").toString();
+								if(tmpGroupId.equals(agentGroupId)) {
+									JSONObject agentObj = new JSONObject();
+									agentObj.put("data", agent);
+									childArr.add(agentObj);
+								}	
+							}
+						}
+						jsonObj.put("children", childArr);
+					}
+				}
+			}
+		} catch (Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		return jsonObj.toJSONString();
+	}
+	
+	@SuppressWarnings("unchecked")
+	public Map<String, Object> policyAppy(Map<String, Object> param) {
+		
+		Map<String, Object> result = new HashMap<String, Object>();
+		
+		String agentIds = param.get("agentIds").toString();
+		ArrayList<String> agentIdList = new Gson().fromJson(agentIds, ArrayList.class);
+		
+		for(String agentId : agentIdList) {
+			param.put("agentId", agentId);
+			
+			try {
+				result = policyMapper.insertAgentPolicyAppy(param);
+				//오류 발생시 리턴
+				if(result.get("result") != null && result.get("result").equals("0")) {
+					return result;
+				}
+			} catch (Exception e) {
+				logger.info(e.getMessage());
+			}
+		}
+		
+		return result;
+		
+	}
+	
+	
+	@SuppressWarnings("unchecked")
+	public Map<String, Object> policyDetail(Map<String, Object> param) {
+		
+		Map<String, Object> result = new HashMap<String, Object>();
+		
+		try {
+			
+			String policyName = "";
+			String policyDesc = "";
+			String policyStat = "";
+			String isPrintControl = "";
+			boolean isLogSend;
+			boolean isCaptureSend;
+			String isWaterMark = "";
+			boolean isLocalInfo;
+			boolean isCustom;
+			String QRCodeMsg = "";
+			String waterMarkMsg = "";
+			String concentration = "";
+			boolean isLocalInfoWater;
+			String waterMarkFont = "";
+			String localPosition = "";
+			String localFont = "";
+			String waterMarkPosition = "";
+			boolean useImage;
+			String waterMarkImg = "";
+			boolean usePersonInfo;
+			String personInfoLogic = "";
+			ArrayList<String> personInfos = new ArrayList<String>();
+			boolean useKeyword;
+			String useFileName = ""; 
+			String useContent = "";
+			List<String> keywords = new ArrayList<String>();
+			ArrayList<String> processList = new ArrayList<String>();
+			ArrayList<String> printerList = new ArrayList<String>();
+			
+			Map<String, Object> policyResult = policyMapper.getPolicyDetail(param);
+			
+			String policyStr = policyResult.get("policyJson").toString();
+			String version = policyResult.get("version").toString();
+			JSONParser parser = new JSONParser();
+			JSONObject policyJson = (JSONObject) parser.parse(policyStr);
+			JSONObject policyInfo = (JSONObject)policyJson.get("POLICYINFO");
+			JSONObject policy = (JSONObject)policyJson.get("POLICY");
+			JSONObject transperInfo = (JSONObject)policy.get("TRANSFERINFO");
+			JSONObject waterMark = (JSONObject)policy.get("WATERMARK");
+			JSONObject regexprs = (JSONObject)policy.get("REGEXPRS");
+			JSONObject keyword = (JSONObject)policy.get("KEYWORD");
+			
+			policyName = CommonUtils.URLDecodeUnicode(policyInfo.get("NAME").toString());
+			policyDesc = CommonUtils.URLDecodeUnicode(policy.get("POLICYDESC").toString());
+			policyStat = (String) policy.get("POLICYSTATUS");
+			isPrintControl = (String) policy.get("PRINTTYPE");
+			isWaterMark = (String) policy.get("WATERMARKTYPE");
+			isCustom = (boolean) policy.get("ISCUSTOMINFO");
+			
+			isLogSend = (boolean) transperInfo.get("SENDFILECONTENTS");
+			isCaptureSend = (boolean) transperInfo.get("SENDCAPTURE");
+			
+			isLocalInfo = (boolean) waterMark.get("IPMARK");
+			QRCodeMsg = (String) waterMark.get("TEXTMARK");
+			waterMarkMsg = (String) waterMark.get("TEXTMARK");
+			concentration = (String) waterMark.get("CONCENTRATION");
+			isLocalInfoWater = (boolean) waterMark.get("IPMARK");
+			waterMarkFont = (String) waterMark.get("SIZE");
+			localPosition = (String) waterMark.get("MARKLOCALPOSITION");
+			localFont = (String) waterMark.get("IPSIZE");
+			waterMarkPosition = (String) waterMark.get("MARKPOSITION");
+			useImage = (boolean) waterMark.get("IMAGEMARK");
+			waterMarkImg = (String) waterMark.get("IMAGE");
+			
+			printerList = (ArrayList<String>) waterMark.get("EXCEPTPRINT");
+			processList = (ArrayList<String>) waterMark.get("EXCEPTPROCESS");
+			
+			usePersonInfo = (boolean) regexprs.get("USEYN");
+			personInfoLogic = (String) regexprs.get("ISAND");
+			
+			Iterator<String> keys = regexprs.keySet().iterator();
+			while(keys.hasNext()){
+				String key = keys.next();
+				if(!key.equals("ISAND") && !key.equals("USEYN")) {
+					personInfos.add(key);
+				}
+	        }
+	         
+			useKeyword = (boolean) keyword.get("USEYN");
+			useContent = (String) keyword.get("CONTENTSEARCH");
+			useFileName = (String) keyword.get("FILENAMESEARCH");
+			keywords = Arrays.asList(CommonUtils.URLDecodeUnicode(keyword.get("KEYWORD").toString()).split(","));
+			
+			byte[] byteImg = null; 
+			String imgSrc = "";
+			if(!waterMarkImg.equals("")){
+				byteImg = Base64.encodeBase64(CommonUtils.hexToByteArray(waterMarkImg));
+				imgSrc = new String(byteImg, 0, byteImg.length);
+			}	
+			
+			result.put("policyName", policyName);
+			result.put("policyDesc", policyDesc);
+			result.put("policyStat", policyStat);
+			result.put("isPrintControl", isPrintControl);
+			result.put("isLogSend", isLogSend == true ? "1" : "0");
+			result.put("isCaptureSend", isCaptureSend == true ? "1" : "0");
+			result.put("isWaterMark", isWaterMark);
+			result.put("isLocalInfo", isLocalInfo == true ? "1" : "0");
+			result.put("isCustom", isCustom == true ? "1" : "0");
+			result.put("QRCodeMsg", QRCodeMsg);
+			result.put("waterMarkMsg", waterMarkMsg);
+			result.put("concentration", concentration);
+			result.put("isLocalInfoWater", isLocalInfoWater == true ? "1" : "0");
+			result.put("waterMarkFont", waterMarkFont);
+			result.put("localPosition", localPosition);
+			result.put("localFont", localFont);
+			result.put("waterMarkPosition", waterMarkPosition);
+			result.put("useImage", useImage == true ? "1" : "0");
+			result.put("waterMarkImg", waterMarkImg);
+			result.put("imgSrc", imgSrc);
+			result.put("usePersonInfo", usePersonInfo == true ? "1" : "0");
+			result.put("personInfoLogic", personInfoLogic);
+			result.put("personInfos", personInfos);
+			result.put("useKeyword", useKeyword == true ? "1" : "0");
+			result.put("useFileName", useFileName);
+			result.put("useContent", useContent);
+			result.put("keywords", keywords);
+			result.put("processList", processList);
+			result.put("printerList", printerList);
+			result.put("version", version);
+			
+		} catch (Exception e) {
+//			logger.info(e.getMessage());
+			e.printStackTrace();
+		}
+		
+		return result;
+		
+	}
+	
+	
+	
+	@SuppressWarnings("unchecked")
+	public Map<String, Object> policyCreate(Map<String, Object> param) {
+		
+		Map<String, Object> result = new HashMap<String, Object>();
+		
+		String isModify = param.get("isModify").toString();
+		String policyId = StringUtils.EMPTY;
+		if(param.get("policyId") != null) {
+			policyId = param.get("policyId").toString();
+		} else {
+			policyId = StringUtils.join("{", UUID.randomUUID(), "}");
+		}
+		
+		String customId = param.get("customId").toString();
+		String version = param.get("version").toString();	
+		String policyName = param.get("policyName").toString();							// 정책명
+		String policyDesc = param.get("policyDesc").toString();							// 정책설명
+		String policyStat = param.get("policyStat").toString();							// 정책상태
+		String isPrintControl = param.get("isPrintControl").toString();					// 프린트제어
+		String isLogSend = param.get("isLogSend").toString();							// 프린트출력로그전송
+		String isCaptureSend = param.get("isCaptureSend").toString();					// 출력화면전송
+		String isWaterMark = param.get("isWaterMark").toString();						// 워터마크사용
+		String isLocalInfo = param.get("isLocalInfo").toString();						// 로컬정보표시
+		String isCustom = param.get("isCustom").toString();								// 고객사정보표시
+		String QRCodeMsg = param.get("QRCodeMsg").toString();							// QR코드문구설정
+		String waterMarkMsg = param.get("waterMarkMsg").toString();						// 워터마크문구설정
+		String concentration = param.get("concentration").toString();					// 워터마크 농도
+		String isLocalInfoWater = param.get("isLocalInfoWater").toString();				// 로컬정보표시
+		String waterMarkFont = param.get("waterMarkFont").toString();					// 워터마크 문구 폰트
+		String localPosition = param.get("localPosition").toString();					// 로컬정보 위치 설정
+		String localFont = param.get("localFont").toString();							// 로컬정보 폰트
+		String waterMarkPosition = param.get("waterMarkPosition").toString();			// 워터마크 문구 위치 설정
+		String useImage = param.get("useImage").toString();								// 이미지 사용
+		String waterMarkImg = param.get("waterMarkImg").toString();						// 이미지
+		
+		String usePersonInfo = param.get("usePersonInfo").toString();					// 개인정보검사 유무
+		String personInfoLogic = param.get("personInfoLogic").toString();				// 개인정보 검사 조건 AND,OR
+		ArrayList<String> personInfos = (ArrayList<String>) param.get("personInfos");	// 선택한 개인정보 목록
+		String useKeyword = param.get("useKeyword").toString();							// 키워드검사 유무
+		String useFileName = param.get("useFileName").toString();						// 파일명 검사 조건 
+		String useContent = param.get("useContent").toString();							// 내용 검사 조건
+		ArrayList<String> keywords = (ArrayList<String>) param.get("keywords");			// 키워드 목록
+		ArrayList<String> processList = (ArrayList<String>) param.get("processList");	// 예외 프로세스 목록
+		ArrayList<String> printerList = (ArrayList<String>) param.get("printerList");	// 예외 프린터 목록
+		
+		
+		String localInfo = isWaterMark.equals("3") ? isLocalInfoWater : isLocalInfo;
+		String msg = isWaterMark.equals("3") ? waterMarkMsg : QRCodeMsg;
+		boolean isImg = isWaterMark.equals("2") ? true : (useImage.equals("1") ? true : false);
+		String keywordList = "";
+		
+		for(String keyword : keywords) {
+			keywordList += StringUtils.join(keyword, ",");
+		}
+		if(keywordList.length() > 0) {
+			keywordList = keywordList.substring(0, keywordList.length()-1);
+		}
+		
+		HashMap<String, Object> codeParam = new HashMap<String, Object>();
+		ArrayList<Map<String, Object>> commonCodes = new ArrayList<Map<String, Object>>();
+		codeParam.put("parentCode", "RegExp");
+		codeParam.put("code", null);
+		
+		try {
+			commonCodes = customMapper.getCommonCodes(codeParam);
+		} catch (Exception e1) {
+			logger.info("getCommonCodes Exception : " + e1.getMessage());
+		}
+		
+		JSONObject rootPolicy = new JSONObject();
+		JSONObject policyInfo = new JSONObject();
+		policyInfo.put("NAME", CommonUtils.URLEncodeUnicode(policyName));
+		policyInfo.put("VERSION", 0);
+		policyInfo.put("ID", policyId);
+		
+		
+		JSONObject policy = new JSONObject();		
+		JSONObject transperInfo = new JSONObject();
+		transperInfo.put("SENDFILECONTENTS", isLogSend.equals("1") ? true : false);
+		transperInfo.put("SENDCAPTURE", isCaptureSend.equals("1") ? true : false);
+
+		JSONObject warterMark = new JSONObject();
+		warterMark.put("MARKLOCALPOSITION", localPosition);
+		warterMark.put("MARKPOSITION", waterMarkPosition);
+		warterMark.put("CONCENTRATION", concentration);
+		warterMark.put("SIZE", waterMarkFont);
+		warterMark.put("IPSIZE", localFont);
+		warterMark.put("PERHIDEUSE", false); //개인정보 마스킹용 에이전트에서 구현안됨
+		
+		warterMark.put("IPMARK", localInfo.equals("1") ? true : false);
+		warterMark.put("TEXTMARK", msg);
+		warterMark.put("IMAGEMARK", isImg);
+		warterMark.put("IMAGE", waterMarkImg);
+		
+		warterMark.put("EXCEPTPRINT", printerList);
+		warterMark.put("EXCEPTPROCESS", processList);
+		
+		JSONObject keyword = new JSONObject();
+		keyword.put("USEYN", useKeyword.equals("1") ? true : false);
+		keyword.put("FILENAMESEARCH", useFileName);
+		keyword.put("CONTENTSEARCH", useContent);
+		keyword.put("KEYWORD", CommonUtils.URLEncodeUnicode(keywordList));
+		
+		JSONObject personInfo = new JSONObject();
+		personInfo.put("USEYN", usePersonInfo.equals("1") ? true : false);
+		personInfo.put("ISAND", personInfoLogic);
+		
+		//선택한 개인정보 정규식 저장
+		for(String person : personInfos) {
+			
+			JSONArray regexpArr = new JSONArray();
+			for(Map<String, Object> map : commonCodes) {
+				
+				if(person.equals("CREDITCARDNUMBER")) {
+					JSONObject regexp = new JSONObject();
+					if(map.get("code").toString().equals("CreditCardExp")) {
+						regexp.put("REGEXPR", CommonUtils.URLEncodeUnicode(map.get("discription").toString()));
+						regexp.put("LIMITEDCOUNT", 0);
+						regexpArr.add(regexp);
+					}
+				} else if(person.equals("EMAIL")) {
+					JSONObject regexp = new JSONObject();
+					if(map.get("code").toString().equals("EMailExp")) {
+						regexp.put("REGEXPR", CommonUtils.URLEncodeUnicode(map.get("discription").toString()));
+						regexp.put("LIMITEDCOUNT", 0);
+						regexpArr.add(regexp);
+					}
+				} else if(person.equals("DRIVERLICENSE")) {
+					JSONObject regexp = new JSONObject();
+					if(map.get("code").toString().equals("DriverLicense")) {
+						regexp.put("REGEXPR", CommonUtils.URLEncodeUnicode(map.get("discription").toString()));
+						regexp.put("LIMITEDCOUNT", 0);
+						regexpArr.add(regexp);
+					}
+				} else if(person.equals("COMPANYREG")) {
+					JSONObject regexp = new JSONObject();
+					if(map.get("code").toString().equals("CompanyRegExp")) {
+						regexp.put("REGEXPR", CommonUtils.URLEncodeUnicode(map.get("discription").toString()));
+						regexp.put("LIMITEDCOUNT", 0);
+						regexpArr.add(regexp);
+					}
+				} else if(person.equals("PASSPORT")) {
+					JSONObject regexp = new JSONObject();
+					if(map.get("code").toString().equals("PassportExp") || map.get("code").toString().equals("NewPassportExp")) {
+						regexp.put("REGEXPR", CommonUtils.URLEncodeUnicode(map.get("discription").toString()));
+						regexp.put("LIMITEDCOUNT", 0);
+						regexpArr.add(regexp);
+					}
+				} else if(person.equals("FOREIGNNUMBER")) {
+					JSONObject regexp = new JSONObject();
+					if(map.get("code").toString().equals("ForignNumber")) {
+						regexp.put("REGEXPR", CommonUtils.URLEncodeUnicode(map.get("discription").toString()));
+						regexp.put("LIMITEDCOUNT", 0);
+						regexpArr.add(regexp);
+					}
+				} else if(person.equals("PHONENUMBER")) {
+					JSONObject regexp = new JSONObject();
+					if(map.get("code").toString().equals("PhoneExpTYPE1") || map.get("code").toString().equals("PhoneExpTYPE2") || map.get("code").toString().equals("PhoneExpTYPE3") || map.get("code").toString().equals("PhoneExpTYPE4")) {
+						regexp.put("REGEXPR", CommonUtils.URLEncodeUnicode(map.get("discription").toString()));
+						regexp.put("LIMITEDCOUNT", 0);
+						regexpArr.add(regexp);
+					}
+				} else if(person.equals("BANKACCOUNT")) {
+					JSONObject regexp = new JSONObject();
+					if(map.get("code").toString().equals("BankExprTYPE1") || map.get("code").toString().equals("BankExprTYPE2")) {
+						regexp.put("REGEXPR", CommonUtils.URLEncodeUnicode(map.get("discription").toString()));
+						regexp.put("LIMITEDCOUNT", 0);
+						regexpArr.add(regexp);
+					}
+				} else if(person.equals("RESIDENTNUMBER")) {
+					JSONObject regexp = new JSONObject();
+					if(map.get("code").toString().equals("ResidentnumberExp")) {
+						regexp.put("REGEXPR", CommonUtils.URLEncodeUnicode(map.get("discription").toString()));
+						regexp.put("LIMITEDCOUNT", 0);
+						regexpArr.add(regexp);
+					}
+				}
+			}
+			personInfo.put(person, regexpArr);
+		}
+		
+		policy.put("POLICYDESC", CommonUtils.URLEncodeUnicode(policyDesc));
+		policy.put("POLICYSTATUS", policyStat);
+		policy.put("ISCUSTOMINFO", isCustom.equals("1") ? true : false);
+		policy.put("PRINTTYPE", isPrintControl);
+		policy.put("TRANSFERINFO", transperInfo);
+		policy.put("WATERMARKTYPE", isWaterMark);
+		policy.put("WATERMARK", warterMark);
+		policy.put("KEYWORD", keyword);
+		policy.put("REGEXPRS", personInfo);
+		
+		rootPolicy.put("POLICYINFO", policyInfo);
+		rootPolicy.put("POLICY", policy);
+		
+		System.out.println(rootPolicy.toJSONString());
+
+		param.put("policyId", policyId);
+		param.put("version", version);
+		param.put("policyType", 1);
+		param.put("policyJson", rootPolicy.toJSONString());
+		
+		try {
+			//정책 생성 및 수정
+			result = policyMapper.insertPolicy(param);
+			
+			//정책 수정의 경우 기존 적용되어 있는 사용자에게 수정된 정책을 다시 전송
+			if(isModify.equals("1")) {
+				ArrayList<Map<String, Object>> applyMap = policyMapper.getApplyAgentList(param);
+				for(Map<String, Object> agentMap : applyMap) {
+					agentMap.put("policyId", policyId);
+					agentMap.put("customId", customId);
+					agentMap.put("policyType", 1);
+					result = policyMapper.insertAgentPolicyAppy(agentMap);
+				}
+			}
+			
+		} catch (Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		return result;
+		
+	}
+	
+	public Map<String, Object> policyDelete(Map<String, Object> param) {
+		
+		Map<String, Object> result = new HashMap<String, Object>();
+		try {
+			result = policyMapper.deletePolicy(param);
+		} catch (Exception e) {
+			logger.info(e.getMessage());
+		}
+		return result;
+	}
+	
+	
+	@SuppressWarnings("unchecked")
+	public Map<String, Object> policyCopy(Map<String, Object> param) {
+		
+		Map<String, Object> result = new HashMap<String, Object>();
+		
+		String policyName = param.get("policyName").toString();
+		String srcPolicyId = param.get("policyId").toString();
+		String descPolicyId = StringUtils.join("{", UUID.randomUUID(), "}");
+		param.put("srcPolicyId", srcPolicyId);
+		param.put("descPolicyId", descPolicyId);
+		
+		try {
+			
+			Map<String, Object> policyResult = policyMapper.getPolicyDetail(param);
+			
+			String policyStr = policyResult.get("policyJson").toString();
+			JSONParser parser = new JSONParser();
+			JSONObject policyJson = (JSONObject) parser.parse(policyStr);
+			JSONObject policyInfo = (JSONObject)policyJson.get("POLICYINFO");
+			policyInfo.put("ID", descPolicyId);
+			policyInfo.put("NAME", CommonUtils.URLEncodeUnicode(policyName));
+			param.put("policyJson", policyJson.toJSONString());
+			result = policyMapper.copyPolicy(param);
+		} catch (Exception e) {
+			logger.info(e.getMessage());
+		}
+		return result;
+	}
+	
+	
+	public ArrayList<Map<String, Object>> getPrintLogList(Map<String, Object> param) {
+		
+		ArrayList<Map<String, Object>> resultList = new ArrayList<Map<String, Object>>();
+		int page = Integer.parseInt(param.get("page").toString());
+		String customId = (String) param.get("customId");
+		String fromDate = (String) param.get("fromDate");
+		String toDate = (String) param.get("toDate");
+		String searchType = (String) param.get("searchType");
+		String searchText = (String) param.get("searchText");
+		String advancedQuery = (String) param.get("advancedQuery");
+
+		//일반검색 고급검색 분기
+		if(searchType.equals("general")) {
+			
+			
+			BoolQueryBuilder boolQuery = searchCondition(searchText);
+			
+			boolQuery.must(QueryBuilders.termQuery("customerId", customId));
+			boolQuery.must(QueryBuilders.termQuery("appName", AppName.REALTIME_FILE_LOG));
+//			boolQuery.must(QueryBuilders.termQuery("outflowType", 3));
+			boolQuery.must(QueryBuilders.rangeQuery("logDate").gte(fromDate).lte(toDate).format("yyyy-MM-dd"));
+			
+			RestHighLevelClient client = esConfig.getRestClient();
+			SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder()
+				.query(boolQuery)
+				.from(page * scrollPagesize)
+				.size(scrollPagesize)
+				.sort("@timestamp", SortOrder.DESC)
+				.fetchSource(Constants.PRINTMODULE_SEARCH_FIELDS, null);
+			
+			HighlightBuilder highlightBuilder = new HighlightBuilder(); 
+			highlightBuilder.preTags(Constants.HIGHLIGHT_TAG).postTags(Constants.HIGHLIGHT_END_TAG);
+			
+			for (String field : Constants.PRINTMODULE_SEARCH_FIELDS) {
+				highlightBuilder.field(new HighlightBuilder.Field(field));
+	        }
+			searchSourceBuilder.highlighter(highlightBuilder);
+			
+			SearchRequest searchRequest = new SearchRequest(index + "*").source(searchSourceBuilder);
+			SearchResponse searchResponse = new SearchResponse();
+			
+			System.out.println(searchRequest.source());
+			
+			try {
+				searchResponse = client.search(searchRequest);
+			} catch(Exception e) {
+				logger.info(e.getMessage());
+			}
+			
+			for(SearchHit hit : searchResponse.getHits()) {
+				Map<String, Object> m = new HashMap<String, Object>();
+				m = hit.getSourceAsMap();
+				m.put("_id", hit.getId());
+				
+				Map<String, HighlightField> highlightFields = hit.getHighlightFields();
+				for (String field : Constants.PRINTMODULE_SEARCH_FIELDS) {
+					HighlightField highlightContentsField = highlightFields.get(field);
+					if (highlightContentsField != null && highlightContentsField.fragments() != null) {
+		                m.put(field, highlightContentsField.fragments()[0].string());
+		            }
+				}
+				resultList.add(m);
+			}
+		} else if(searchType.equals("advanced")) {
+			//고급검색
+			String esUrl = "http://" + hosts + ":" + port + "/_xpack/sql/translate";
+			String sql = " SELECT " + StringUtils.join(Constants.PRINTMODULE_SEARCH_FIELDS, ",") +
+						 " FROM \\\"" + index+"dfas" + "\\\"" + 
+						 " WHERE appName = '" + AppName.REALTIME_FILE_LOG + "' AND outflowType = 3" + 
+						 " AND " + advancedQuery;
+			
+			try {
+				System.out.println(sql);
+				
+				URL url = new URL(esUrl);
+				HttpURLConnection con = (HttpURLConnection) url.openConnection();
+				con.setRequestMethod("POST");
+				con.setRequestProperty("Content-Type", "application/json");
+				con.setDoOutput(true);
+				
+				String urlParameters = "{\"query\":\"" + sql + "\"}";
+				OutputStream os = con.getOutputStream();
+				BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(os, "UTF-8"));
+				writer.write(urlParameters);
+				writer.flush();
+				writer.close();
+				os.close();
+				
+				int responseCode = con.getResponseCode();
+				StringBuffer response = new StringBuffer();
+				if(responseCode == HttpURLConnection.HTTP_OK) {
+					BufferedReader in = new BufferedReader(new InputStreamReader(con.getInputStream()));
+					String inputLine;
+					
+					while ((inputLine = in.readLine()) != null) {
+						response.append(inputLine);
+					}
+					in.close();
+				}
+				
+				JSONParser parser = new JSONParser();
+				JSONObject queryJosn = (JSONObject) parser.parse(response.toString());
+				String query = queryJosn.get("query").toString();
+				
+				System.out.println(query);
+				RestHighLevelClient client = esConfig.getRestClient();
+				SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
+				searchSourceBuilder.query(QueryBuilders.wrapperQuery(query));
+				
+				SearchRequest searchRequest = new SearchRequest(index + "*").source(searchSourceBuilder);
+				SearchResponse searchResponse = new SearchResponse();
+				
+				System.out.println(searchRequest.source());
+				
+				try {
+					searchResponse = client.search(searchRequest);
+				} catch(Exception e) {
+					logger.info(e.getMessage());
+				}
+				
+				for(SearchHit hit : searchResponse.getHits()) {
+					Map<String, Object> m = new HashMap<String, Object>();
+					m = hit.getSourceAsMap();
+					resultList.add(m);
+				}
+				
+			} catch (Exception e) {
+				// TODO Auto-generated catch block
+				logger.info(e.getMessage());
+			}
+			
+		}
+		
+		return resultList;
+		
+	}
+	
+	public BoolQueryBuilder searchCondition(String searchStr) {
+        BoolQueryBuilder searchBoolQuery = QueryBuilders.boolQuery();
+
+        if (StringUtils.isNotBlank(searchStr)) {
+            Map<String, Object> searchWordMap = searchWordString(searchStr);
+
+            if (!searchWordMap.isEmpty()) {
+                searchBoolQuery = makeSearchBoolQuery(searchWordMap, searchBoolQuery);
+            }
+        }
+
+        return searchBoolQuery;
+    }
+	
+	public BoolQueryBuilder makeSearchBoolQuery(Map<String, Object> queryMap, BoolQueryBuilder searchBoolQuery) {
+        String nGramQuery = (String) queryMap.get("nGramQuery");
+        String whiteSpaceQuery = (String) queryMap.get("whiteSpaceQuery");
+
+        BoolQueryBuilder boolSearchQuery = new BoolQueryBuilder();
+
+        QueryStringQueryBuilder nGramQueryBuilder = queryStringQuery(nGramQuery).defaultOperator(Operator.OR);
+        QueryStringQueryBuilder whiteSpaceQueryBuilder = queryStringQuery(whiteSpaceQuery).defaultOperator(Operator.OR);
+
+
+        for (String field : Constants.NGRAM_FIELDS) {
+        	if(field.equals("fileName")) { 
+        		nGramQueryBuilder.field(field);
+        	}
+        }
+        
+        String[] whiteSpaceFields = {"agentName", "agentDeptName", "printName"};
+        for (String field : whiteSpaceFields) {
+            whiteSpaceQueryBuilder.field(field);
+        }
+
+        // Master BoolQuery
+        boolSearchQuery.should(nGramQueryBuilder).should(whiteSpaceQueryBuilder).minimumShouldMatch(1);
+        searchBoolQuery.must(boolSearchQuery);
+        
+        return searchBoolQuery;
+
+    }
+	
+	@SuppressWarnings("unchecked")
+	public JSONArray groupListToJson(ArrayList<Map<String, Object>> groupList, ArrayList<Map<String, Object>> agentList, String groupId, int groupDepth){
+		
+		JSONArray childArr = new JSONArray();
+		for(Map<String, Object> group : groupList) {
+			
+			int tmpGroupDepth = Integer.parseInt(group.get("groupDepth").toString());
+			if(tmpGroupDepth == groupDepth){
+				String tmpGroupId = group.get("groupId").toString();
+				String tmpParentGroupId = group.get("parentGroupId").toString();
+				
+				//그룹 하위 노드들을 추가
+				if(groupId.equals(tmpParentGroupId)){
+					JSONObject dataObj = new JSONObject();
+					JSONArray childNodeArr = new JSONArray();
+					
+					if(hasChild(groupList, tmpGroupId)){
+						childNodeArr = groupListToJson(groupList, agentList, tmpGroupId, tmpGroupDepth + 1);
+					}
+
+					//그룹에 속한 에이전트를 추가
+					for(Map<String, Object> agent : agentList) {
+						if(agent.get("groupId") != null) {
+							String agentGroupId = agent.get("groupId").toString();
+							if(tmpGroupId.equals(agentGroupId)) {
+								JSONObject agentObj = new JSONObject();
+								agentObj.put("data", agent);
+								childNodeArr.add(agentObj);
+							}	
+						}
+					}
+					if(childNodeArr.size() != 0) {
+						dataObj.put("children", childNodeArr);
+					}
+					
+					dataObj.put("data", group);
+					childArr.add(dataObj);
+				}
+			}
+		}
+		
+		return childArr;
+	}
+	
+	//하위노드가 있는지 검색
+	public boolean hasChild(ArrayList<Map<String, Object>> groupList, String groupId){
+		boolean result = false;
+		for(Map<String, Object> m : groupList) {
+			if(groupId.equals(m.get("parentGroupId").toString())){
+ 				return true;
+			}
+		}
+		return result;
+	}
+	
+	
+}

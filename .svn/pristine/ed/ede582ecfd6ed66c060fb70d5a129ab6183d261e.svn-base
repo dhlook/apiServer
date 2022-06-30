@@ -1,0 +1,197 @@
+package com.slamdh.apiserver.controller;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseBody;
+
+import com.slamdh.apiserver.service.AnalysisService;
+
+@Controller
+public class AnalysisController {
+	
+	@Autowired
+	AnalysisService analysisService;
+
+	@RequestMapping({"/api/analysis/outflow/top"})
+	@ResponseBody
+	Map<String, Object> analysisTop5(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String dateType = request.getParameter("dateType");
+		params.put("dateType", dateType);
+		
+		return analysisService.getAnalysisTop5(params);
+		
+	}
+	
+	@RequestMapping({"/api/analysis/outflow/count"})
+	@ResponseBody
+	Map<String, Object> analysisListCount(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String dateType = request.getParameter("dateType");
+		params.put("dateType", dateType);
+		
+		return analysisService.getAnalysisListCount(params);
+		
+	}
+	
+	@RequestMapping({"/api/analysis/outflow/list"})
+	@ResponseBody
+	ArrayList<Map<String, Object>> analysisList(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String dateType = request.getParameter("dateType");
+		String page = request.getParameter("page");
+		params.put("dateType", dateType);
+		params.put("page", page);
+		
+		return analysisService.getAnalysisList(params);
+		
+	}
+	
+	@RequestMapping({"/api/analysis/network/chart"})
+	@ResponseBody
+	Map<String, Object> netAnalysisChart(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String dateType = request.getParameter("dateType");
+		params.put("dateType", dateType);
+		
+		return analysisService.getNetAnalysisChart(params);
+		
+	}
+	
+	@RequestMapping({"/api/analysis/network/count"})
+	@ResponseBody
+	Map<String, Object> netAnalysisListCount(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String dateType = request.getParameter("dateType");
+		params.put("dateType", dateType);
+		return analysisService.getNetAnalysisListCount(params);
+		
+	}
+	
+	@RequestMapping({"/api/analysis/network/list"})
+	@ResponseBody
+	ArrayList<Map<String, Object>> netAnalysisList(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String dateType = request.getParameter("dateType");
+		String page = request.getParameter("page");
+		params.put("dateType", dateType);
+		params.put("page", page);
+		
+		return analysisService.getNetAnalysisList(params);
+		
+	}
+	
+	@RequestMapping({"/api/analysis/network/detail/count"})
+	@ResponseBody
+	Map<String, Object> netAccessListCount(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String dateType = request.getParameter("dateType");
+		String agentId = request.getParameter("agentId");
+		params.put("dateType", dateType);
+		params.put("agentId", agentId);
+		
+		return analysisService.getNetAccessListCount(params);
+		
+	}
+	
+	@RequestMapping({"/api/analysis/network/detail/list"})
+	@ResponseBody
+	ArrayList<Map<String, Object>> netAccessList(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String dateType = request.getParameter("dateType");
+		String agentId = request.getParameter("agentId");
+		String page = request.getParameter("page2");
+		params.put("dateType", dateType);
+		params.put("agentId", agentId);
+		params.put("page", page);
+		
+		return analysisService.getNetAccessList(params);
+		
+	}
+	
+	@RequestMapping({"/api/analysis/user/chart"})
+	@ResponseBody
+	ArrayList<Map<String, Object>> userAnalysisChart(HttpServletRequest request, HttpServletResponse response) {
+	
+	Map<String, Object> params = new HashMap<String, Object>();
+		String dateType = request.getParameter("dateType");
+		params.put("dateType", dateType);
+		
+		return analysisService.getUserAnalysisChart(params);
+		
+	}
+	
+	@RequestMapping({"/api/analysis/user/top5"})
+	@ResponseBody
+	ArrayList<Map<String, Object>> userAnalysisTop5(HttpServletRequest request, HttpServletResponse response) {
+	
+	Map<String, Object> params = new HashMap<String, Object>();
+		String dateType = request.getParameter("dateType");
+		params.put("dateType", dateType);
+		
+		return analysisService.getUserAnalysisTop5(params);
+		
+	}
+	
+	@RequestMapping({"/api/analysis/eventList/count"})
+	@ResponseBody
+	Map<String, Object> userEventLogListCount(HttpServletRequest request, HttpServletResponse response) {
+	
+	Map<String, Object> params = new HashMap<String, Object>();
+		String dateType = request.getParameter("dateType");
+		String eventType = request.getParameter("eventType");
+		params.put("dateType", dateType);
+		params.put("eventType", eventType);
+		
+		return analysisService.getUserEventLogListCount(params);
+		
+	}
+	
+	@RequestMapping({"/api/analysis/eventList"})
+	@ResponseBody
+	ArrayList<Map<String, Object>> userEventLogList(HttpServletRequest request, HttpServletResponse response) {
+	
+	Map<String, Object> params = new HashMap<String, Object>();
+		String dateType = request.getParameter("dateType");
+		String eventType = request.getParameter("eventType");
+		String page = request.getParameter("page");
+		params.put("page", page);
+		params.put("dateType", dateType);
+		params.put("eventType", eventType);
+		
+		return analysisService.getUserEventLogList(params);
+		
+	}
+	
+	
+	@RequestMapping({"/api/analysis/file/list"})
+	@ResponseBody
+	ArrayList<Map<String, Object>> analysisFileList(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String fileType = request.getParameter("fileType");
+		String page = request.getParameter("page");
+		params.put("fileType", fileType);
+		params.put("page", page);
+		
+		return analysisService.getAnalysisFileList(params);
+		
+	}
+	
+}

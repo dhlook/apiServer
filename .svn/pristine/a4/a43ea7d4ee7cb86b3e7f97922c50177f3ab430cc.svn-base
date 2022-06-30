@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+
+<mapper namespace="com.slamdh.apiserver.mapper.PolicyMapper">
+ 
+ 	<select id="getPolicyList" parameterType="HashMap" resultType="HashMap" statementType="CALLABLE">
+		call sp_policy_list_select(#{customId}, #{policyType})
+	</select>
+	
+	<select id="getPolicyDetail" parameterType="HashMap" resultType="HashMap" statementType="CALLABLE">
+		call sp_policy_select(#{customId}, #{policyId})
+	</select>
+	
+ 	<select id="insertAgentPolicyAppy" parameterType="HashMap" resultType="HashMap" statementType="CALLABLE">
+		call sp_agent_policy_apply(#{customId}, #{policyId}, #{agentId}, #{policyType})
+	</select>
+ 
+ 	<select id="insertPolicy" parameterType="HashMap" resultType="HashMap" statementType="CALLABLE">
+		call sp_policy_insert(#{customId}, #{policyId}, #{policyName}, #{version}, #{policyType}, #{policyJson}, #{adminId}, #{isPrintControl}, #{isWaterMark})
+	</select>
+	
+	<select id="deletePolicy" parameterType="HashMap" resultType="HashMap" statementType="CALLABLE">
+		call sp_policy_delete(#{customId}, #{policyId})
+	</select>
+	
+ 	<select id="copyPolicy" parameterType="HashMap" resultType="HashMap" statementType="CALLABLE">
+		call sp_policy_copy(#{customId}, #{srcPolicyId}, #{descPolicyId}, #{policyName}, #{policyJson}, #{adminId})
+	</select>
+ 
+ 	<select id="getApplyAgentList" parameterType="HashMap" resultType="HashMap" statementType="CALLABLE">
+		call sp_agent_policy_apply_list(#{policyId})
+	</select>
+ 
+
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+	<select id="getSelectPolicylists" parameterType="HashMap" resultType="HashMap" statementType="CALLABLE">
+		call usp_policy_select(#{customId}, #{viewType})
+	</select>
+
+	<select id="setInsertPolicylist" parameterType="HashMap" resultType="int" statementType="CALLABLE">
+		call usp_policy_insert( #{customId}, #{policyId}, #{PolicyName}, #{Version}, #{DLPType}, #{isPCSecu}, #{isAgentCollect}, #{isDocuCollect}, #{isMailCoolect}, #{isRealtime}, #{isMediaCon}, #{isNetCon}, #{isPrintCon}, #{isPCCon}, #{isWebBlock}, #{isProcessBlock}, #{isFileBlock}, #{isScreencaptureBlock}, #{isShareFolderBock} , #{isWatermark} ,#{isMobile}, #{isBluetooth}, #{isDirectport}, #{isSerialport}, #{isClipboard} , #{islan} , #{ispassword} , #{isscreensaver})
+	</select>
+	
+	<select id="setUpdatePolicylist" parameterType="HashMap" resultType="int" statementType="CALLABLE">
+		call usp_policy_update( #{customId}, #{policyId}, #{PolicyName}, #{Version}, #{DLPType}, #{isPCSecu}, #{isAgentCollect}, #{isDocuCollect}, #{isMailCoolect}, #{isRealtime}, #{isMediaCon}, #{isNetCon}, #{isPrintCon}, #{isPCCon}, #{isWebBlock}, #{isProcessBlock}, #{isFileBlock}, #{isScreencaptureBlock}, #{isShareFolderBock}, #{isWatermark} ,#{isMobile}, #{isBluetooth}, #{isDirectport}, #{isSerialport}, #{isClipboard} , #{islan} , #{ispassword} , #{isscreensaver}   )
+	</select>
+
+	<select id="setDeletePolicylist" parameterType="HashMap" resultType="int" statementType="CALLABLE"> 
+      call usp_delete_policylists(#{customId}, #{policyId})  	   
+    </select>    
+
+	<select id="getPolicyApplyAgentList" parameterType="HashMap" resultType="String" statementType="CALLABLE"> 
+      call usp_agent_policy_apply_check(#{customId}, #{policyId})  	   
+    </select>    
+    
+    
+</mapper>

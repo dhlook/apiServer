@@ -1,0 +1,1103 @@
+package com.slamdh.apiserver.service;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+
+import org.elasticsearch.action.search.SearchRequest;
+import org.elasticsearch.action.search.SearchResponse;
+import org.elasticsearch.client.RestHighLevelClient;
+import org.elasticsearch.index.query.BoolQueryBuilder;
+import org.elasticsearch.index.query.QueryBuilder;
+import org.elasticsearch.index.query.QueryBuilders;
+import org.elasticsearch.index.query.TermsQueryBuilder;
+import org.elasticsearch.search.SearchHit;
+import org.elasticsearch.search.aggregations.AggregationBuilders;
+import org.elasticsearch.search.aggregations.BucketOrder;
+import org.elasticsearch.search.aggregations.bucket.filter.Filter;
+import org.elasticsearch.search.aggregations.bucket.filter.FilterAggregationBuilder;
+import org.elasticsearch.search.aggregations.bucket.terms.Terms;
+import org.elasticsearch.search.aggregations.bucket.terms.Terms.Bucket;
+import org.elasticsearch.search.aggregations.bucket.terms.TermsAggregationBuilder;
+import org.elasticsearch.search.aggregations.metrics.tophits.TopHits;
+import org.elasticsearch.search.builder.SearchSourceBuilder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import com.slamdh.apiserver.AppName;
+import com.slamdh.apiserver.Constants;
+import com.slamdh.apiserver.ElasticsearchConfiguration;
+import com.slamdh.apiserver.mapper.BlackListMapper;
+
+@Service
+public class AnalysisService extends CommonService{
+
+	static final Logger logger = LoggerFactory.getLogger(AnalysisService.class);
+	
+	@Autowired
+	ElasticsearchConfiguration esConfig;
+	@Autowired
+	BlackListMapper blackListMapper;
+	
+	@Value("${spring.data.elasticsearch.index}")
+	String index;
+	@Value("${spring.data.elasticsearch.type}")
+	String type;
+	
+	
+	public Map<String, Object> getAnalysisTop5(Map<String, Object> param) {
+		
+		Map<String, Object> map = new HashMap<String, Object>();
+		
+		String dateType = (String) param.get("dateType");
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.must(QueryBuilders.termsQuery("outflowType", "1","2","3"));
+		boolQuery.must(QueryBuilders.rangeQuery("@timestamp").gte(getFrom(dateType)));
+		
+		TermsAggregationBuilder agentAggs = AggregationBuilders.terms("outflow_agent").field("agentId").order(BucketOrder.count(false)).size(5);
+		agentAggs.subAggregation(AggregationBuilders.topHits("agentName").size(1).fetchSource(new String[] {"agentName", "agentDeptName"}, null));
+		TermsAggregationBuilder typeAggs = AggregationBuilders.terms("outflow_type").field("outflowSubType").order(BucketOrder.count(false)).size(5);
+		TermsAggregationBuilder procAggs = AggregationBuilders.terms("outflow_proc").field("processName.raw").order(BucketOrder.count(false)).size(5);
+		
+		
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery).aggregation(agentAggs).aggregation(typeAggs).aggregation(procAggs);
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		
+		SearchResponse searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		Terms outflowAgent = searchResponse.getAggregations().get("outflow_agent");
+		Terms outflowType = searchResponse.getAggregations().get("outflow_type");
+		Terms outflowProc = searchResponse.getAggregations().get("outflow_proc");
+		
+		List<Map<String, Object>> agentList = new ArrayList<Map<String, Object>>();
+		List<Map<String, Object>> typeList = new ArrayList<Map<String, Object>>();
+		List<Map<String, Object>> procList = new ArrayList<Map<String, Object>>();
+		
+		
+		for(Bucket b :outflowAgent.getBuckets()) {
+			Map<String, Object> m = new HashMap<String, Object>();
+			TopHits topHit = b.getAggregations().get("agentName");
+			
+			for(SearchHit hit : topHit.getHits()) {
+				m.put("name", hit.getSourceAsMap().get("agentName"));
+			}
+			m.put("value", b.getDocCount());
+			agentList.add(m);
+		}
+		
+		for(Bucket b :outflowType.getBuckets()) {
+			Map<String, Object> m = new HashMap<String, Object>();
+			m.put("name", b.getKeyAsString());
+			m.put("value", b.getDocCount());
+			typeList.add(m);
+		}
+		
+		for(Bucket b :outflowProc.getBuckets()) {
+			Map<String, Object> m = new HashMap<String, Object>();
+			m.put("name", b.getKeyAsString());
+			m.put("value", b.getDocCount());
+			procList.add(m);
+		}
+		
+		map.put("agentList", agentList);
+		map.put("typeList", typeList);
+		map.put("procList", procList);
+		
+		return map;
+		
+	}
+	
+	
+	public Map<String, Object> getAnalysisListCount(Map<String, Object> param) {
+		
+		Map<String, Object> map = new HashMap<String, Object>();
+		
+		String dateType = (String) param.get("dateType");
+		
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.must(QueryBuilders.termsQuery("outflowType", "1","2","3"));
+		boolQuery.must(QueryBuilders.rangeQuery("@timestamp").gte(getFrom(dateType)));
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery);
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		
+		SearchResponse searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		map.put("totalCnt", searchResponse.getHits().getTotalHits());
+		
+		return map;
+		
+	}
+	
+	public ArrayList<Map<String, Object>> getAnalysisList(Map<String, Object> param) {
+		
+		ArrayList<Map<String, Object>> resultList = new ArrayList<Map<String, Object>>();
+		
+		int page = Integer.parseInt((String)param.get("page"));
+		String dateType = (String) param.get("dateType");
+		
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.must(QueryBuilders.termsQuery("outflowType", "1","2","3"));
+		boolQuery.must(QueryBuilders.rangeQuery("@timestamp").gte(getFrom(dateType)));
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery).from(page * 10).size(10);
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		
+		SearchResponse searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		for(SearchHit hit : searchResponse.getHits()) {
+			resultList.add(hit.getSourceAsMap());
+		}
+		
+		return resultList;
+		
+	}
+	
+	
+	public Map<String, Object> getNetAnalysisChart(Map<String, Object> param) {
+		
+		Map<String, Object> map = new HashMap<String, Object>();
+		
+		String dateType = (String) param.get("dateType");
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.must(QueryBuilders.rangeQuery("@timestamp").gte(getFrom(dateType)));
+		
+		TermsAggregationBuilder webAggs = AggregationBuilders.terms("web_cnt").field("hostUrl.raw").order(BucketOrder.count(false)).size(5);
+		FilterAggregationBuilder webDownAggs = AggregationBuilders.filter("webdown_cnt", QueryBuilders.termQuery("appName", AppName.BROWSER_DOWNLOAD));
+		webDownAggs.subAggregation(AggregationBuilders.terms("webdown").field("domainName.raw").order(BucketOrder.count(false)).size(5));
+		
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery).aggregation(webAggs).aggregation(webDownAggs);
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		
+		SearchResponse searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		Terms webCnt = searchResponse.getAggregations().get("web_cnt");
+		Filter webDownCnt = searchResponse.getAggregations().get("webdown_cnt");
+		Terms webDownload = webDownCnt.getAggregations().get("webdown");
+		
+		List<Map<String, Object>> webList = new ArrayList<Map<String, Object>>();
+		List<Map<String, Object>> webDownList = new ArrayList<Map<String, Object>>();
+		
+		for(Bucket b : webCnt.getBuckets()) {
+			Map<String, Object> m = new HashMap<String, Object>();
+			m.put("name", b.getKeyAsString());
+			m.put("value", b.getDocCount());
+			webList.add(m);
+		}
+		
+		for(Bucket b : webDownload.getBuckets()) {
+			Map<String, Object> m = new HashMap<String, Object>();
+			m.put("name", b.getKeyAsString());
+			m.put("value", b.getDocCount());
+			webDownList.add(m);
+		}
+	
+		map.put("webList", webList);
+		map.put("webDownList", webDownList);
+		
+		return map;
+		
+	}
+	
+	public Map<String, Object> getNetAnalysisListCount(Map<String, Object> param) {
+		
+		Map<String, Object> map = new HashMap<String, Object>();
+		
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.must(QueryBuilders.termsQuery("appName", AppName.INTERNET, AppName.WEBSITE_BLOCK));
+		
+		TermsAggregationBuilder agentAggs = AggregationBuilders.terms("agent_list").field("agentId");
+	
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery).aggregation(agentAggs);
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		
+		SearchResponse searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		Terms agentCnt = searchResponse.getAggregations().get("agent_list");
+
+		map.put("totalCnt", agentCnt.getBuckets().size());
+		
+		return map;
+	}
+
+	public ArrayList<Map<String, Object>> getNetAnalysisList(Map<String, Object> param) {
+		
+		int from = Integer.parseInt((String)param.get("page"));
+		
+		ArrayList<Map<String, Object>> list = new ArrayList<Map<String, Object>>();
+		
+		String dateType = (String) param.get("dateType");
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.must(QueryBuilders.termsQuery("appName", AppName.INTERNET, AppName.WEBSITE_BLOCK));
+		
+		
+		TermsAggregationBuilder agentAggs = AggregationBuilders.terms("agent_list").field("agentId");
+		agentAggs.subAggregation(AggregationBuilders.topHits("agentName").size(1).fetchSource(new String[] {"agentName", "agentDeptName"}, null));
+		agentAggs.subAggregation(AggregationBuilders.filter("month", QueryBuilders.rangeQuery("@timestamp").gte("now-30d/d")));
+		agentAggs.subAggregation(AggregationBuilders.filter("week", QueryBuilders.rangeQuery("@timestamp").gte("now-7d/d")));
+		agentAggs.subAggregation(AggregationBuilders.filter("condition", QueryBuilders.rangeQuery("@timestamp").gte(getFrom(dateType))));
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery).aggregation(agentAggs);
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		
+		SearchResponse searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		Terms agentCnt = searchResponse.getAggregations().get("agent_list");
+		
+		for(Bucket b : agentCnt.getBuckets()) {
+			Map<String, Object> m = new HashMap<String, Object>(); 
+		
+			Filter month = b.getAggregations().get("month");
+			Filter week = b.getAggregations().get("week");
+			Filter condition = b.getAggregations().get("condition");
+			TopHits topHit = b.getAggregations().get("agentName");
+			
+			long increaseRate = 0;
+			
+			try {
+				increaseRate = ((week.getDocCount() - month.getDocCount()) * 100 / month.getDocCount());
+			} catch (ArithmeticException e) {
+				increaseRate = 0;
+			}
+			
+			for(SearchHit hit : topHit.getHits()) {
+				m.put("agentName", hit.getSourceAsMap().get("agentName"));
+				m.put("agentDeptName", hit.getSourceAsMap().get("agentDeptName"));
+			}
+			m.put("agentId", b.getKeyAsString());
+			m.put("monthCnt", month.getDocCount());
+			m.put("weekCnt", week.getDocCount());
+			m.put("rate", increaseRate);
+			m.put("conditionCnt", condition.getDocCount());
+			list.add(m);
+		}
+		
+
+		Collections.sort(list, new Comparator<Map<String, Object>>() {
+	        public int compare(final Map<String, Object> map1, final Map<String, Object> map2) {
+	            return map1.get("agentId").toString().compareTo(map2.get("agentId").toString());
+	        }
+	    });
+		
+		/*Aggs에서 페이징이 안되기때문에 여기서 페이징 처리*/
+		int start, end = 0;
+		
+		if(from == 0) {
+			start = 0;
+			end = 10;
+		} else {
+			start = from * 10;
+			end = (from + 1) * 10;
+		}
+		
+		if(end > list.size()) {
+			end = list.size();
+		}
+		
+		return new ArrayList<Map<String,Object>>(list.subList(start, end));
+		
+	}
+	
+	public Map<String, Object> getNetAccessListCount(Map<String, Object> param) {
+		
+		Map<String, Object> map = new HashMap<String, Object>();
+		
+		String dateType = (String) param.get("dateType");
+		String agentId = (String) param.get("agentId");
+		
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.must(QueryBuilders.termsQuery("appName", AppName.INTERNET, AppName.WEBSITE_BLOCK));
+		boolQuery.must(QueryBuilders.termQuery("agentId", agentId));
+		boolQuery.must(QueryBuilders.rangeQuery("@timestamp").gte(getFrom(dateType)));
+		
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery);
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		
+		SearchResponse searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		map.put("totalCnt", searchResponse.getHits().getTotalHits());
+		
+		return map;
+	}
+	
+	public ArrayList<Map<String, Object>> getNetAccessList(Map<String, Object> param) {
+		
+		ArrayList<Map<String, Object>> list = new ArrayList<Map<String, Object>>();
+		
+		int page = Integer.parseInt((String)param.get("page"));
+		
+		String dateType = (String) param.get("dateType");
+		String agentId = (String) param.get("agentId");
+		
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.must(QueryBuilders.termsQuery("appName", AppName.INTERNET, AppName.WEBSITE_BLOCK));
+		boolQuery.must(QueryBuilders.termQuery("agentId", agentId));
+		boolQuery.must(QueryBuilders.rangeQuery("@timestamp").gte(getFrom(dateType)));
+		
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery).from(page * 10).size(10);
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		
+		SearchResponse searchResponse = new SearchResponse();
+
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		for(SearchHit hit : searchResponse.getHits()) {
+			list.add(hit.getSourceAsMap());
+		}
+		
+		return list;
+	}
+	
+	
+	public ArrayList<Map<String, Object>> getUserAnalysisChart(Map<String, Object> param) {
+		
+		ArrayList<Map<String, Object>> list = new ArrayList<Map<String, Object>>();
+		Map<String, Object> map = new HashMap<String, Object>();
+		
+		String dateType = (String) param.get("dateType");
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.must(QueryBuilders.rangeQuery("@timestamp").gte(getFrom(dateType)));
+		
+		
+		// 의심프로세스
+		BoolQueryBuilder liveProcessInfo = QueryBuilders.boolQuery()
+				.must(QueryBuilders.termQuery("appName", AppName.LIVE_PROCESS))
+				.must(QueryBuilders.termQuery("isMatchName", 1))
+				.must(QueryBuilders.termQuery("isCodesign", 0))
+				.must(QueryBuilders.termQuery("isHide", 1))
+				.must(QueryBuilders.termQuery("companyName", ""));
+		
+		BoolQueryBuilder liveServiceInfo = QueryBuilders.boolQuery()
+				.must(QueryBuilders.termQuery("appName", AppName.LIVE_SERVICE))
+				.must(QueryBuilders.termQuery("isCodesign", 0))
+				.must(QueryBuilders.termQuery("companyName", ""));
+		
+		BoolQueryBuilder autorunLog = QueryBuilders.boolQuery()
+				.must(QueryBuilders.termQuery("appName", AppName.AUTORUN))
+				.must(QueryBuilders.termQuery("isMatchName", 1))
+				.must(QueryBuilders.termQuery("isCodesign", 0))
+				.must(QueryBuilders.termQuery("companyName", ""));
+		// 의심파일
+		BoolQueryBuilder recentDocsLog = QueryBuilders.boolQuery()
+				.must(QueryBuilders.termsQuery("appName", AppName.RECENT_DOCS, AppName.LINK_FILE))
+				.must(QueryBuilders.termQuery("isMacro", 1));
+		
+		// 비업무 웹접속, 웹검색, 프로세스
+		TermsQueryBuilder blWebsite = null;
+		TermsQueryBuilder blKeyword = null;
+		TermsQueryBuilder blProcess = null;
+		
+		try {
+			Map<String, String> blParam = new HashMap<String, String>();
+			ArrayList<Map<String, String>> blackList = blackListMapper.getBlackList(blParam);
+			
+			for(Map<String, String> m : blackList) {
+				
+				String content = m.get("blackListContents");
+				String[] contentArr = content.split(",");
+				if(m.get("blackListType").toString().equals("1")) {
+					blWebsite = QueryBuilders.termsQuery("hostUrl", contentArr);
+					
+				} else if(m.get("blackListType").toString().equals("2")) {
+					blKeyword = QueryBuilders.termsQuery("searchKeyword", contentArr);
+				} else if(m.get("blackListType").toString().equals("3")) {
+					blProcess = QueryBuilders.termsQuery("processName", contentArr);
+				}
+			}
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		
+		FilterAggregationBuilder processAggs = AggregationBuilders.filter("process", liveProcessInfo);
+		FilterAggregationBuilder serviceAggs = AggregationBuilders.filter("service", liveServiceInfo);
+		FilterAggregationBuilder autorunAggs = AggregationBuilders.filter("autorun", autorunLog);
+		FilterAggregationBuilder recentDocsAggs = AggregationBuilders.filter("recentDoc", recentDocsLog);
+		// 매체, 네트워크, 프린터 유출
+		TermsAggregationBuilder outflowAggs = AggregationBuilders.terms("outflow").field("outflowType");
+		// pc 보안 취약	
+		TermsAggregationBuilder pcSecuAggs = AggregationBuilders.terms("typeAgg").field("analysisType");
+		pcSecuAggs.subAggregation(AggregationBuilders.terms("agentAgg").field("agentId")
+			.subAggregation(AggregationBuilders.terms("dateAggs").field("@timestamp").order(BucketOrder.key(false)).size(1)
+			.subAggregation(AggregationBuilders.filter("dangerCnt", QueryBuilders.termQuery("dangerFlag", "1")))));
+		//블랙리스트
+		FilterAggregationBuilder blWebsiteAggs = AggregationBuilders.filter("blWebsite", blWebsite);
+		FilterAggregationBuilder blKeywordAggs = AggregationBuilders.filter("blKeyword", blKeyword);
+		FilterAggregationBuilder blProcessAggs = AggregationBuilders.filter("blProcess", blProcess);
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery)
+				.aggregation(processAggs)
+				.aggregation(serviceAggs)
+				.aggregation(autorunAggs)
+				.aggregation(recentDocsAggs)
+				.aggregation(outflowAggs)
+				.aggregation(pcSecuAggs)
+				.aggregation(blWebsiteAggs)
+				.aggregation(blKeywordAggs)
+				.aggregation(blProcessAggs);
+		
+		
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		
+		SearchResponse searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		
+		Filter processCnt = searchResponse.getAggregations().get("process");
+		Filter serviceCnt = searchResponse.getAggregations().get("service");
+		Filter autorunCnt = searchResponse.getAggregations().get("autorun");
+		Filter recentDocCnt = searchResponse.getAggregations().get("recentDoc");
+		Terms outflowCnt = searchResponse.getAggregations().get("outflow");
+		Terms typeBuckets = searchResponse.getAggregations().get("typeAgg");
+		Filter blWebsiteCnt = searchResponse.getAggregations().get("blWebsite");
+		Filter blKeywordCnt = searchResponse.getAggregations().get("blKeyword");
+		Filter blProcessCnt = searchResponse.getAggregations().get("blProcess");
+		
+		
+		long anomalyProcessCnt = processCnt.getDocCount() + serviceCnt.getDocCount() + autorunCnt.getDocCount();
+		long anomalyFileCnt = recentDocCnt.getDocCount();
+		
+		// 유출 타입별 건수
+		for(Bucket b : outflowCnt.getBuckets()) {
+			//로컬에서 이동일경우 -1
+			if(!b.getKeyAsString().toString().equals("-1")) {
+				map.put("outflow_"+ b.getKeyAsString(), b.getDocCount());
+			}
+		}
+		
+		int violationCnt = 0;
+		for(Bucket typeBucket : typeBuckets.getBuckets()) {
+			Terms agentBuckets = typeBucket.getAggregations().get("agentAgg");
+			for(Bucket agentBucket : agentBuckets.getBuckets()) {
+				Terms dateBuckets = agentBucket.getAggregations().get("dateAggs");
+				for(Bucket dateBucket : dateBuckets.getBuckets()) {
+					Filter dagnetCnt = dateBucket.getAggregations().get("dangerCnt");
+					violationCnt += dagnetCnt.getDocCount();
+				}
+			}
+		};
+		
+		map.put("anomalyProcessCnt", anomalyProcessCnt);
+		map.put("anomalyFileCnt", anomalyFileCnt);
+		map.put("violationCnt", violationCnt);
+		map.put("blWebsiteCnt", blWebsiteCnt.getDocCount());
+		map.put("blKeywordCnt", blKeywordCnt.getDocCount());
+		map.put("blProcessCnt", blProcessCnt.getDocCount());
+		
+		Iterator<String> keys = map.keySet().iterator();
+        while( keys.hasNext() ){
+            String key = keys.next();
+            Map<String, Object> m = new HashMap<String, Object>();
+			m.put("name", key);
+			m.put("value", map.get(key));
+			list.add(m);
+        }
+
+		return list;
+	}
+	
+	
+	public ArrayList<Map<String, Object>> getUserAnalysisTop5(Map<String, Object> param) {
+		
+		
+		ArrayList<Map<String, Object>> list = new ArrayList<Map<String, Object>>();
+		
+		String dateType = (String) param.get("dateType");
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.must(QueryBuilders.rangeQuery("@timestamp").gte(getFrom(dateType)));
+		
+		
+		
+		TermsAggregationBuilder violationAggs = AggregationBuilders.terms("violation").field("analysisType");
+		violationAggs.subAggregation(AggregationBuilders.terms("top").field("@timestamp").order(BucketOrder.key(false)).size(1)
+				.subAggregation(AggregationBuilders.filter("danger", QueryBuilders.termQuery("dangerFlag", "1"))));
+		
+		
+		TermsAggregationBuilder aggs = AggregationBuilders.terms("agent").field("agentId");
+		aggs.subAggregation(AggregationBuilders.topHits("agentName").size(1).fetchSource(new String[] {"agentName", "agentDeptName"}, null));
+		aggs.subAggregation(AggregationBuilders.filter("outflow", QueryBuilders.termsQuery("outflowType", "1","2","3")));
+		aggs.subAggregation(AggregationBuilders.filter("blacklist", getBlackListQuery()));
+		aggs.subAggregation(AggregationBuilders.filter("anomaly", getAnomalyQuery()));
+		aggs.subAggregation(violationAggs);
+		
+		
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery).aggregation(aggs);
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		SearchResponse searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+	
+		Terms agentCnt = searchResponse.getAggregations().get("agent");
+		
+		for(Bucket b : agentCnt.getBuckets()) {
+			Filter outflowCnt = b.getAggregations().get("outflow");
+			Filter blackListCnt = b.getAggregations().get("blacklist");
+			Filter anomalyCnt = b.getAggregations().get("anomaly");
+			Terms violation = b.getAggregations().get("violation");
+			TopHits topHit = b.getAggregations().get("agentName");
+			
+			long totalCnt = 0;
+			long violationCnt = 0;
+			
+			for(Bucket violationBucket : violation.getBuckets()) {
+				Terms top = violationBucket.getAggregations().get("top");
+				for(Bucket topViolation : top.getBuckets()) {
+					Filter danger = topViolation.getAggregations().get("danger");
+					violationCnt =+ danger.getDocCount();
+				}
+			}
+			
+			totalCnt = outflowCnt.getDocCount() + blackListCnt.getDocCount() + anomalyCnt.getDocCount() + violationCnt;
+			
+			Map<String, Object> m = new HashMap<String, Object>();
+			for(SearchHit hit : topHit.getHits()) {
+				m.put("agentName", hit.getSourceAsMap().get("agentName"));
+				m.put("agentDeptName", hit.getSourceAsMap().get("agentDeptName"));
+			}
+			m.put("agentId", b.getKey());
+			m.put("outflowCnt", outflowCnt.getDocCount());
+			m.put("blackListCnt", blackListCnt.getDocCount());
+			m.put("anomalyCnt", anomalyCnt.getDocCount());
+			m.put("violationCnt", violationCnt);
+			m.put("totalCnt", totalCnt);
+			
+			list.add(m);
+		}
+		
+		//비교 정렬 후 
+		Collections.sort(list, new Comparator<Map<String, Object>>() {
+	        public int compare(final Map<String, Object> map1, final Map<String, Object> map2) {
+	        	if(Integer.parseInt(map1.get("totalCnt").toString()) > Integer.parseInt(map2.get("totalCnt").toString())) {
+	        		return -1;
+	        	} else if(Integer.parseInt(map1.get("totalCnt").toString()) < Integer.parseInt(map2.get("totalCnt").toString())) {
+	        		return 1;
+	        	}
+	        	return 0;
+	        }
+	    });
+
+		// Top5 사용자만 표시
+		ArrayList<Map<String, Object>> resultList = new ArrayList<Map<String, Object>>();
+		for(int i = 0; i < list.size(); i++) {
+			if(i < 5) {
+				resultList.add(list.get(i));	
+			}
+		}
+		
+		return resultList;
+	}
+	
+	
+	public Map<String, Object> getUserEventLogListCount(Map<String, Object> param) {
+		
+		
+		Map<String, Object> map = new HashMap<String, Object>();
+		
+		String dateType = (String) param.get("dateType");
+		String eventType = (String) param.get("eventType");
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.must(QueryBuilders.rangeQuery("@timestamp").gte(getFrom(dateType)));
+		TermsAggregationBuilder pcSecuAggs = null;
+		
+		switch (eventType) {
+			case "outflow1":
+				boolQuery.must(QueryBuilders.termQuery("outflowType", "1"));
+				break;
+			
+			case "outflow2":
+				boolQuery.must(QueryBuilders.termQuery("outflowType", "2"));
+				break;
+				
+			case "outflow3":
+				boolQuery.must(QueryBuilders.termQuery("outflowType", "3"));
+				break;
+				
+			case "process":
+				BoolQueryBuilder liveProcessInfo = QueryBuilders.boolQuery()
+						.must(QueryBuilders.termQuery("appName", AppName.LIVE_PROCESS))
+						.must(QueryBuilders.termQuery("isMatchName", 1))
+						.must(QueryBuilders.termQuery("isCodesign", 0))
+						.must(QueryBuilders.termQuery("isHide", 1))
+						.must(QueryBuilders.termQuery("companyName", ""));
+		
+				BoolQueryBuilder liveServiceInfo = QueryBuilders.boolQuery()
+						.must(QueryBuilders.termQuery("appName", AppName.LIVE_SERVICE))
+						.must(QueryBuilders.termQuery("isCodesign", 0))
+						.must(QueryBuilders.termQuery("companyName", ""));
+				
+				BoolQueryBuilder autorunLog = QueryBuilders.boolQuery()
+						.must(QueryBuilders.termQuery("appName", AppName.AUTORUN))
+						.must(QueryBuilders.termQuery("isMatchName", 1))
+						.must(QueryBuilders.termQuery("isCodesign", 0))
+						.must(QueryBuilders.termQuery("companyName", ""));
+				boolQuery.should(liveProcessInfo).should(liveServiceInfo).should(autorunLog).minimumShouldMatch(1);
+				break;
+				
+			case "file":
+				boolQuery.must(QueryBuilders.termsQuery("appName", AppName.RECENT_DOCS, AppName.LINK_FILE)).must(QueryBuilders.termQuery("isMacro", 1));
+				break;
+				
+			case "violation":
+				// pc 보안 취약	
+				pcSecuAggs = AggregationBuilders.terms("typeAgg").field("analysisType");
+				pcSecuAggs.subAggregation(AggregationBuilders.terms("agentAgg").field("agentId")
+					.subAggregation(AggregationBuilders.terms("dateAggs").field("@timestamp").order(BucketOrder.key(false)).size(1)
+							.subAggregation(AggregationBuilders.filter("dangerCnt", QueryBuilders.termQuery("dangerFlag", "1"))
+									.subAggregation(AggregationBuilders.topHits("top").size(1)))));
+				break;
+				
+			case "blackWeb":
+				try {
+					Map<String, String> blParam = new HashMap<String, String>();
+					blParam.put("type", "1");
+					ArrayList<Map<String, String>> blackList = blackListMapper.getBlackList(blParam);
+					TermsQueryBuilder blWebsite = null;
+					
+					for(Map<String, String> m : blackList) {
+						String content = m.get("blackListContents");
+						String[] contentArr = content.split(",");
+						blWebsite = QueryBuilders.termsQuery("hostUrl", contentArr);
+						
+					}
+					boolQuery.must(blWebsite);
+				} catch(Exception e) {
+					logger.info(e.getMessage());
+				}
+				break;
+				
+			case "blackKey":
+				try {
+					Map<String, String> blParam = new HashMap<String, String>();
+					blParam.put("type", "2");
+					ArrayList<Map<String, String>> blackList = blackListMapper.getBlackList(blParam);
+					TermsQueryBuilder blWebsite = null;
+					
+					for(Map<String, String> m : blackList) {
+						String content = m.get("blackListContents");
+						String[] contentArr = content.split(",");
+						blWebsite = QueryBuilders.termsQuery("searchKeyword", contentArr);
+						
+					}
+					boolQuery.must(blWebsite);
+				} catch(Exception e) {
+					logger.info(e.getMessage());
+				}
+				break;
+				
+			case "blackPro":
+				try {
+					Map<String, String> blParam = new HashMap<String, String>();
+					blParam.put("type", "3");
+					ArrayList<Map<String, String>> blackList = blackListMapper.getBlackList(blParam);
+					TermsQueryBuilder blWebsite = null;
+					
+					for(Map<String, String> m : blackList) {
+						String content = m.get("blackListContents");
+						String[] contentArr = content.split(",");
+						blWebsite = QueryBuilders.termsQuery("processName", contentArr);
+						
+					}
+					boolQuery.must(blWebsite);
+				} catch(Exception e) {
+					logger.info(e.getMessage());
+				}
+				break;
+		}
+		
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
+		
+		//보안진단일경우 Aggs에서 데이터를 뽑아야함.
+		if(eventType.equals("violation")) {
+			searchSourceBuilder.query(QueryBuilders.matchAllQuery()).aggregation(pcSecuAggs);
+		} else {
+			searchSourceBuilder.query(boolQuery);
+		}
+		
+		
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		SearchResponse searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		if(eventType.equals("violation")) {
+			long violationCnt = 0;
+			Terms typeBuckets = searchResponse.getAggregations().get("typeAgg");
+			for(Bucket typeBucket : typeBuckets.getBuckets()) {
+				Terms agentBuckets = typeBucket.getAggregations().get("agentAgg");
+				for(Bucket agentBucket : agentBuckets.getBuckets()) {
+					Terms dateBuckets = agentBucket.getAggregations().get("dateAggs");
+					for(Bucket dateBucket : dateBuckets.getBuckets()) {
+						Filter dagnetCnt = dateBucket.getAggregations().get("dangerCnt");
+						violationCnt += dagnetCnt.getDocCount();
+					}
+				}
+			};
+			map.put("totalCnt", violationCnt);
+		} else {
+			map.put("totalCnt", searchResponse.getHits().getTotalHits());
+		}
+		
+		return map;
+	}
+	
+	public ArrayList<Map<String, Object>> getUserEventLogList(Map<String, Object> param) {
+		
+		
+		ArrayList<Map<String, Object>> list = new ArrayList<Map<String, Object>>();
+		
+		int page = Integer.parseInt((String)param.get("page"));
+		String dateType = (String) param.get("dateType");
+		String eventType = (String) param.get("eventType");
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.must(QueryBuilders.rangeQuery("@timestamp").gte(getFrom(dateType)));
+		TermsAggregationBuilder pcSecuAggs = null;
+		
+		switch (eventType) {
+			case "outflow1":
+				boolQuery.must(QueryBuilders.termQuery("outflowType", "1"));
+				break;
+			
+			case "outflow2":
+				boolQuery.must(QueryBuilders.termQuery("outflowType", "2"));
+				break;
+				
+			case "outflow3":
+				boolQuery.must(QueryBuilders.termQuery("outflowType", "3"));
+				break;
+				
+			case "process":
+				BoolQueryBuilder liveProcessInfo = QueryBuilders.boolQuery()
+						.must(QueryBuilders.termQuery("appName", AppName.LIVE_PROCESS))
+						.must(QueryBuilders.termQuery("isMatchName", 1))
+						.must(QueryBuilders.termQuery("isCodesign", 0))
+						.must(QueryBuilders.termQuery("isHide", 1))
+						.must(QueryBuilders.termQuery("companyName", ""));
+		
+				BoolQueryBuilder liveServiceInfo = QueryBuilders.boolQuery()
+						.must(QueryBuilders.termQuery("appName", AppName.LIVE_SERVICE))
+						.must(QueryBuilders.termQuery("isCodesign", 0))
+						.must(QueryBuilders.termQuery("companyName", ""));
+				
+				BoolQueryBuilder autorunLog = QueryBuilders.boolQuery()
+						.must(QueryBuilders.termQuery("appName", AppName.AUTORUN))
+						.must(QueryBuilders.termQuery("isMatchName", 1))
+						.must(QueryBuilders.termQuery("isCodesign", 0))
+						.must(QueryBuilders.termQuery("companyName", ""));
+				boolQuery.should(liveProcessInfo).should(liveServiceInfo).should(autorunLog).minimumShouldMatch(1);
+				break;
+				
+			case "file":
+				boolQuery.must(QueryBuilders.termsQuery("appName", AppName.RECENT_DOCS, AppName.LINK_FILE)).must(QueryBuilders.termQuery("isMacro", 1));
+				break;
+				
+			case "violation":
+				// pc 보안 취약	
+				pcSecuAggs = AggregationBuilders.terms("typeAgg").field("analysisType");
+				pcSecuAggs.subAggregation(AggregationBuilders.terms("agentAgg").field("agentId")
+					.subAggregation(AggregationBuilders.terms("dateAggs").field("@timestamp").order(BucketOrder.key(false)).size(1)
+							.subAggregation(AggregationBuilders.filter("dangerCnt", QueryBuilders.termQuery("dangerFlag", "1"))
+									.subAggregation(AggregationBuilders.topHits("top").size(1)))));
+				break;
+				
+			case "blackWeb":
+				try {
+					Map<String, String> blParam = new HashMap<String, String>();
+					blParam.put("type", "1");
+					ArrayList<Map<String, String>> blackList = blackListMapper.getBlackList(blParam);
+					TermsQueryBuilder blWebsite = null;
+					
+					for(Map<String, String> m : blackList) {
+						String content = m.get("blackListContents");
+						String[] contentArr = content.split(",");
+						blWebsite = QueryBuilders.termsQuery("hostUrl", contentArr);
+						
+					}
+					boolQuery.must(blWebsite);
+				} catch(Exception e) {
+					logger.info(e.getMessage());
+				}
+				break;
+				
+			case "blackKey":
+				try {
+					Map<String, String> blParam = new HashMap<String, String>();
+					blParam.put("type", "2");
+					ArrayList<Map<String, String>> blackList = blackListMapper.getBlackList(blParam);
+					TermsQueryBuilder blWebsite = null;
+					
+					for(Map<String, String> m : blackList) {
+						String content = m.get("blackListContents");
+						String[] contentArr = content.split(",");
+						blWebsite = QueryBuilders.termsQuery("searchKeyword", contentArr);
+						
+					}
+					boolQuery.must(blWebsite);
+				} catch(Exception e) {
+					logger.info(e.getMessage());
+				}
+				break;
+				
+			case "blackPro":
+				try {
+					Map<String, String> blParam = new HashMap<String, String>();
+					blParam.put("type", "3");
+					ArrayList<Map<String, String>> blackList = blackListMapper.getBlackList(blParam);
+					TermsQueryBuilder blWebsite = null;
+					
+					for(Map<String, String> m : blackList) {
+						String content = m.get("blackListContents");
+						String[] contentArr = content.split(",");
+						blWebsite = QueryBuilders.termsQuery("processName", contentArr);
+						
+					}
+					boolQuery.must(blWebsite);
+				} catch(Exception e) {
+					logger.info(e.getMessage());
+				}
+				break;
+		}
+		
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder();
+		
+		//보안진단일경우 Aggs에서 데이터를 뽑아야함.
+		if(eventType.equals("violation")) {
+			searchSourceBuilder.query(QueryBuilders.matchAllQuery()).aggregation(pcSecuAggs);
+		} else {
+			searchSourceBuilder.query(boolQuery).from(page * 10).size(10);
+		}
+		
+		
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		SearchResponse searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+	
+		if(eventType.equals("violation")) {
+			
+			Terms typeBuckets = searchResponse.getAggregations().get("typeAgg");
+			for(Bucket typeBucket : typeBuckets.getBuckets()) {
+				Terms agentBuckets = typeBucket.getAggregations().get("agentAgg");
+				for(Bucket agentBucket : agentBuckets.getBuckets()) {
+					Terms dateBuckets = agentBucket.getAggregations().get("dateAggs");
+					for(Bucket dateBucket : dateBuckets.getBuckets()) {
+						Filter dagnetCnt = dateBucket.getAggregations().get("dangerCnt");
+						TopHits topHits = dagnetCnt.getAggregations().get("top");
+						for(SearchHit hit : topHits.getHits()) {
+							Map<String,Object> map = new HashMap<String,Object>();
+							map = hit.getSourceAsMap();
+							map.put("_id", hit.getId());
+							list.add(hit.getSourceAsMap());
+						}
+					}
+				}
+			};
+			
+			Collections.sort(list, new Comparator<Map<String, Object>>() {
+		        public int compare(final Map<String, Object> map1, final Map<String, Object> map2) {
+		            return map1.get("_id").toString().compareTo(map2.get("_id").toString());
+		        }
+		    });
+			
+			/*Aggs에서 페이징이 안되기때문에 여기서 페이징 처리*/
+			int start, end = 0;
+			
+			if(page == 0) {
+				start = 0;
+				end = 10;
+			} else {
+				start = page * 10;
+				end = (page + 1) * 10;
+			}
+			
+			if(end > list.size()) {
+				end = list.size();
+			}
+			
+			return new ArrayList<Map<String,Object>>(list.subList(start, end));
+			
+		} else {
+			for(SearchHit hit : searchResponse.getHits()) {
+				list.add(hit.getSourceAsMap());
+			}
+		}
+		
+		return list;
+	}
+	
+	
+	public ArrayList<Map<String, Object>> getAnalysisFileList(Map<String, Object> param) {
+		
+		ArrayList<Map<String, Object>> resultList = new ArrayList<Map<String, Object>>();
+		
+		int page = Integer.parseInt((String)param.get("page"));
+		String fileType = (String) param.get("fileType");
+		
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		
+		// 1:문서파일 , 2:실행파일, 3:삭제파일
+		// peType 0:문서, 1:실행
+		if(fileType.equals("1")) {
+			boolQuery.must(QueryBuilders.termsQuery("appName", Constants.BOTH_FILE));
+			boolQuery.must(QueryBuilders.termQuery("peType", "0")); 
+		} else if(fileType.equals("2")) {
+			BoolQueryBuilder subBoolQuery = QueryBuilders.boolQuery();
+			subBoolQuery.must(QueryBuilders.termsQuery("appName", Constants.BOTH_FILE));
+			subBoolQuery.must(QueryBuilders.termQuery("peType", "1")); 
+			boolQuery.should(subBoolQuery);
+			boolQuery.should(QueryBuilders.termsQuery("appName", Constants.PE_FILE));
+			boolQuery.minimumShouldMatch(1);
+		} else {
+			BoolQueryBuilder subBoolQuery = QueryBuilders.boolQuery();
+			subBoolQuery.must(QueryBuilders.termQuery("appName", AppName.REALTIME_FILE_LOG));
+			subBoolQuery.must(QueryBuilders.termQuery("logType", "3"));
+			boolQuery.should(subBoolQuery);
+			boolQuery.should(QueryBuilders.termQuery("appName", AppName.DELETE_FILELISTS));
+			boolQuery.minimumShouldMatch(1);
+		}
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder()
+				.query(boolQuery)
+				.from(page * scrollPagesize)
+				.size(scrollPagesize);
+		
+		SearchRequest searchRequest = new SearchRequest(index + Constants.PRODUCT_TYPE_DFAS, index+"20*").types(type).source(searchSourceBuilder);
+		SearchResponse searchResponse = new SearchResponse();
+
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		for(SearchHit hit : searchResponse.getHits()) {
+			resultList.add(hit.getSourceAsMap());
+		}
+		
+		return resultList;
+		
+	}
+	
+	
+	public String getFrom(String dateType) {
+		
+		String from = "";
+		if(dateType.equals("1")) {
+			from = "now-1d/d";
+		} else if(dateType.equals("2")) {
+			from = "now-6d/d";
+		} else {
+			from = "now-30d/d";
+		}
+		return from;
+	}
+	
+	public BoolQueryBuilder getBlackListQuery() {
+		
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		
+		try {
+			Map<String, String> blParam = new HashMap<String, String>();
+			ArrayList<Map<String, String>> blackList = blackListMapper.getBlackList(blParam);
+			
+			for(Map<String, String> m : blackList) {
+				String content = m.get("blackListContents");
+				String[] contentArr = content.split(",");
+				if(m.get("blackListType").toString().equals("1")) {
+					boolQuery.should(QueryBuilders.termsQuery("hostUrl", contentArr));
+				} else if(m.get("blackListType").toString().equals("2")) {
+					boolQuery.should(QueryBuilders.termsQuery("searchKeyword", contentArr));
+				} else if(m.get("blackListType").toString().equals("3")) {
+					boolQuery.should(QueryBuilders.termsQuery("processName", contentArr));
+				}
+			}
+			
+			boolQuery.minimumShouldMatch(1);
+			
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		return boolQuery;
+	}
+	
+}

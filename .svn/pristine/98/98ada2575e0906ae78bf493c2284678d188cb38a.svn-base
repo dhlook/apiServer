@@ -1,0 +1,30 @@
+package com.slamdh.apiserver;
+
+
+public final class Constants {
+
+    public static final String[] NGRAM_FIELDS = {"hostUrl", "searchKeyword", "directoryUrl", "processName", "fileName", "cmdName", "networkAdapterName", "subject"};
+    
+    public static final String[] WHITESPACE_FIELDS = {"srcPath","beforeIp", "afterIp", "localIp", "localPort", "remoteIp", "remotePort", "linkName", 
+    		"autorunFileInfo", "publisher", "macAddress","deleteName","productName", "serialNumber", "eventlogId", "mruValue", "registryKey", "registryPath", 
+    		"domainName", "mailPath", "agentName", "agentDeptName", "installPath", "filePath", "folderPath", "contents"};
+    
+    public static final String[] SEARCH_FIELDS = {"agentName", "agentDeptName", "appName", "@timestamp", "fileId",
+			"hostUrl", "searchKeyword", "directoryUrl", "processName", "fileName", "cmdName", "networkAdapterName","subject", "srcPath", "beforeIp", "afterIp",
+			"localIp","localPort", "remoteIp", "remotePort", "linkName", "autorunFileInfo", "publisher", "macAddress", "deleteName", "productName", "serialNumber",
+			"eventlogId", "mruValue", "registryKey", "registryPath", "domainName", "mailPath", "installPath", "filePath", "folderPath"};
+    
+    
+    public static final String[] PRINTMODULE_SEARCH_FIELDS = {"agentName", "agentDeptName", "isBlock", "printName", "fileName", "logDate", "peCnt", "keywordCnt"};
+
+    public static final String[] TIMELINE_QUERY_EXCLUDE_FIELDS = {"contents"};
+    
+    public final static String HIGHLIGHT_TAG = "<span class='t_focusing'>";
+    public final static String HIGHLIGHT_END_TAG = "</span>";
+    public static final String contentsScript = "(doc['contents.raw'].value != null && doc['contents.raw'].value != '') ? (doc['contents.raw'].value.toString().length() > 100 ? doc['contents.raw'].value.substring(0,100) : doc['contents.raw'].value) : null";
+    
+    public static final String[] PE_FILE = {AppName.LIVE_PROCESS, AppName.LIVE_SERVICE, AppName.AUTORUN, AppName.PREFETCH_FILE, AppName.UNINSTALL};
+    public static final String[] BOTH_FILE = {AppName.BROWSER_DOWNLOAD, AppName.RECENT_DOCS, AppName.WIN_CMDS, AppName.JUMPLIST};
+    
+    public static final String PRODUCT_TYPE_DFAS = "dfas";
+}

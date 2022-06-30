@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+
+<mapper namespace="com.slamdh.apiserver.mapper.BlackListMapper">
+
+    <select id="getBlackList" resultType="HashMap" parameterType="HashMap">
+    	SELECT
+			BLACKLISTTYPE AS blackListType,
+			GROUP_CONCAT(BLACKLISTCONTENTS) AS blackListContents
+		FROM TBL_BLACKLIST_PREF
+		<if test="type != null">
+    	WHERE BLACKLISTTYPE = #{type}
+    	</if>
+    	GROUP BY BLACKLISTTYPE
+    </select>
+    
+</mapper>
+
+

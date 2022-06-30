@@ -1,0 +1,50 @@
+package com.slamdh.apiserver.mapper;
+
+import java.util.ArrayList;
+import java.util.Map;
+ 
+
+public interface AgentMapper {
+	
+	public Map<String, Object> getPolicyApplyAgentCount(String customId)throws Exception ;
+	
+	public ArrayList<Map<String, Object>> getAgentPolicyList(Map<String, Object> map)throws Exception ;
+	
+	
+    // 매체 제어 에이전트 수를 구하는 방식이 다르기 때문에 별도 SP로 관리함 	 
+	public Map<String, Object> getMediaconPolicyApplyAgentCount(String customId)throws Exception ;
+	
+	// 예외USB로 등록된 사용자 수 
+	public int getAgentExceptUSBMappingCount(String customId)throws Exception ;	
+	
+	
+	
+	
+	
+	
+	public ArrayList<Map<String, Object>>  SelectAgentLists(Map<String, Object> map)throws Exception ;
+	
+	public int UpdateAgentData(Map<String, Object> map)throws Exception ;
+	 	
+	public ArrayList<Map<String, Object>>  SelectTempPolicyList()throws Exception ;	
+
+	public int AgentPolicyApply(Map<String, Object> map)throws Exception ;
+	
+	public int AgentPolicyApply_list(Map<String, Object> map)throws Exception ;
+	
+	public int agentUninstall(Map<String, Object> map)throws Exception ;
+
+	public ArrayList<Map<String, Object>>  selectUninstallAgent(Map<String, Object> map)throws Exception ;	
+	
+	public int UninstallAgentResult(Map<String, Object> map)throws Exception ;	
+	
+	public int OfflineAgentDeleteDatabase(Map<String, Object> map)throws Exception ;
+	
+	public int DeleteAgentData(Map<String, Object> map)throws Exception ;
+	
+	public ArrayList<Map<String, Object>>  selectAgentDeleteList(Map<String, Object> map)throws Exception ;	
+	
+	
+	
+	
+}

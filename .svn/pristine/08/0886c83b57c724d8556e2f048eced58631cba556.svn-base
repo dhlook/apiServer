@@ -1,0 +1,105 @@
+package com.slamdh.apiserver.utils;
+
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
+import java.util.Date;
+import java.util.SimpleTimeZone;
+
+public class TimeUtilLib {
+	public String todaydate(String format){
+		SimpleDateFormat formatter = new SimpleDateFormat(format);
+		
+		Date today = new Date();
+		return formatter.format(today);
+	}
+	public String intervalDate(int diff_day){
+		Calendar cal = Calendar.getInstance(new SimpleTimeZone(0x1ee6280, "KST"));
+		SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd");
+
+		String start_date = String.valueOf(cal.get(Calendar.YEAR)) + "-" + 
+				String.valueOf(cal.get(Calendar.MONDAY)+1) + "-" + String.valueOf(cal.get(Calendar.DATE));
+		
+		cal.add(Calendar.DAY_OF_MONTH , diff_day * -1);
+		Date monthago = cal.getTime();
+		start_date = df.format(monthago);
+		
+		return start_date;
+	}
+	public String todaydate(){
+		Calendar cal = Calendar.getInstance();
+		SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd");
+				
+		String start_date = String.valueOf(cal.get(Calendar.YEAR)) + "-" + 
+		String.valueOf(cal.get(Calendar.MONDAY)+1) + "-" + String.valueOf(cal.get(Calendar.DATE));						
+		
+		try {
+			Date date = formatter.parse(start_date);
+			start_date = formatter.format(date); 
+		} catch (ParseException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		
+		return start_date;
+	}
+	public String month_min_three_date(){
+		
+		Calendar cal = Calendar.getInstance();		
+		cal.add(cal.MONTH, -3);
+		SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd");
+		
+		String end_date = String.valueOf(cal.get(Calendar.YEAR)) + "-" + 
+		String.valueOf(cal.get(Calendar.MONDAY)+1) + "-" + String.valueOf(cal.get(Calendar.DATE));						
+		
+		try {
+			Date date = formatter.parse(end_date);
+			end_date = formatter.format(date); 
+		} catch (ParseException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		
+		return end_date;
+	}
+	/*지난해 날짜*/
+	public String last_year_date(){
+		
+		Calendar cal = Calendar.getInstance();		
+		cal.add(cal.MONTH, -12);
+		SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd");
+		
+		String end_date = String.valueOf(cal.get(Calendar.YEAR)) + "-" + 
+				String.valueOf(cal.get(Calendar.MONDAY)+1) + "-" + String.valueOf(cal.get(Calendar.DATE));						
+		
+		try {
+			Date date = formatter.parse(end_date);
+			end_date = formatter.format(date); 
+		} catch (ParseException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		
+		return end_date;
+	}
+	/*내년 날짜*/
+	public String next_year_date(){
+		
+		Calendar cal = Calendar.getInstance();		
+		cal.add(cal.MONTH, +12);
+		SimpleDateFormat formatter = new SimpleDateFormat("yyyy-MM-dd");
+		
+		String end_date = String.valueOf(cal.get(Calendar.YEAR)) + "-" + 
+				String.valueOf(cal.get(Calendar.MONDAY)+1) + "-" + String.valueOf(cal.get(Calendar.DATE));						
+		
+		try {
+			Date date = formatter.parse(end_date);
+			end_date = formatter.format(date); 
+		} catch (ParseException e) {
+			// TODO Auto-generated catch block
+			e.printStackTrace();
+		}
+		
+		return end_date;
+	}
+}

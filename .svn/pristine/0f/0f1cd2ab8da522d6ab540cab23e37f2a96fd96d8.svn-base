@@ -1,0 +1,158 @@
+package com.slamdh.apiserver.service;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Map.Entry;
+
+import org.apache.commons.lang3.StringUtils;
+import org.elasticsearch.action.search.SearchRequest;
+import org.elasticsearch.action.search.SearchResponse;
+import org.elasticsearch.client.RestHighLevelClient;
+import org.elasticsearch.common.document.DocumentField;
+import org.elasticsearch.index.query.BoolQueryBuilder;
+import org.elasticsearch.index.query.QueryBuilders;
+import org.elasticsearch.script.Script;
+import org.elasticsearch.script.ScriptType;
+import org.elasticsearch.search.SearchHit;
+import org.elasticsearch.search.builder.SearchSourceBuilder;
+import org.elasticsearch.search.fetch.subphase.highlight.HighlightBuilder;
+import org.elasticsearch.search.fetch.subphase.highlight.HighlightField;
+import org.elasticsearch.search.sort.SortOrder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import com.slamdh.apiserver.AppName;
+import com.slamdh.apiserver.Constants;
+import com.slamdh.apiserver.ElasticsearchConfiguration;
+
+@Service
+public class SearchService extends CommonService {
+
+	static final Logger logger = LoggerFactory.getLogger(SearchService.class);
+	
+	@Autowired
+	ElasticsearchConfiguration esConfig;
+	
+	@Value("${spring.data.elasticsearch.index}")
+	String index;
+	@Value("${spring.data.elasticsearch.type}")
+	String type;
+	
+
+	public ArrayList<Map<String, Object>> getSearchList(Map<String, Object> param) {
+		
+		String searchStr = (String)param.get("searchStr");
+		int page = Integer.parseInt(param.get("page").toString());
+		ArrayList<Map<String, Object>> resultList = new ArrayList<Map<String, Object>>();
+		
+		BoolQueryBuilder boolQuery = searchCondition(searchStr);
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder()
+			.query(boolQuery)
+			.from(page * scrollPagesize)
+			.size(scrollPagesize)
+			.sort("@timestamp", SortOrder.DESC)
+			.fetchSource(Constants.SEARCH_FIELDS, Constants.TIMELINE_QUERY_EXCLUDE_FIELDS)
+			.scriptField("contents", new Script(ScriptType.INLINE, "painless", Constants.contentsScript, Collections.emptyMap()));
+		
+		HighlightBuilder highlightBuilder = new HighlightBuilder(); 
+		highlightBuilder.preTags(Constants.HIGHLIGHT_TAG).postTags(Constants.HIGHLIGHT_END_TAG);
+		
+		for (String field : Constants.SEARCH_FIELDS) {
+			highlightBuilder.field(new HighlightBuilder.Field(field));
+        }
+		
+		searchSourceBuilder.highlighter(highlightBuilder);
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		SearchResponse searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		for(SearchHit hit : searchResponse.getHits()) {
+			
+			Map<String, Object> m = new HashMap<String, Object>();
+			
+			m = hit.getSourceAsMap();
+			m.put("_id", hit.getId());
+			
+			Map<String, HighlightField> highlightFields = hit.getHighlightFields();
+			for (String field : Constants.SEARCH_FIELDS) {
+				HighlightField highlightContentsField = highlightFields.get(field);
+				if (highlightContentsField != null && highlightContentsField.fragments() != null && field.equals("agentName") && field.equals("agentDeptName")) {
+	                m.put(field, highlightContentsField.fragments()[0].string());
+	            }
+			}
+			
+			for (Entry<String, DocumentField> field : hit.getFields().entrySet()) {
+				if (field.getKey().equals("contents") && field.getValue().getValues().size() > 0) {
+					m.put("contents", field.getValue().getValues().get(0));
+				}
+			}
+			
+			resultList.add(m);
+		}
+		return resultList;
+	}
+	
+	public Map<String, Object> getSearchDetail(Map<String, Object> param) {
+		
+		Map<String, Object> resultMap = new HashMap<String, Object>();
+		
+		String id = (String)param.get("id");
+		String fileId = (String)param.get("fileId");
+		
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.must(QueryBuilders.termQuery("_id", id));
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery);
+		
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		SearchResponse searchResponse = new SearchResponse();
+		
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		for(SearchHit hit : searchResponse.getHits()) {
+			resultMap = hit.getSourceAsMap();
+		}
+		
+		// 파일, 메일파일일 경우 파일내용 조회
+		if(!StringUtils.isEmpty(fileId)) {
+			boolQuery = QueryBuilders.boolQuery();
+			boolQuery.must(QueryBuilders.termQuery("appName", AppName.FILE_CONTENTS));
+			boolQuery.must(QueryBuilders.termQuery("fileId", fileId));
+			
+			searchSourceBuilder = new SearchSourceBuilder().query(boolQuery).fetchSource("contents", null);
+			searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+			
+			try {
+				searchResponse = client.search(searchRequest);
+			} catch(Exception e) {
+				logger.info(e.getMessage());
+			}
+			
+			for(SearchHit hit : searchResponse.getHits()) {
+				Map<String, Object> contentsMap = new HashMap<String, Object>();
+				contentsMap = hit.getSourceAsMap();
+				resultMap.put("contents", contentsMap.get("contents"));
+			}
+		}
+		
+		return resultMap;
+		
+	}
+	
+}

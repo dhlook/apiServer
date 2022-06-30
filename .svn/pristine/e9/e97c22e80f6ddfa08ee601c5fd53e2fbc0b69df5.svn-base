@@ -1,0 +1,340 @@
+package com.slamdh.apiserver.utils;
+
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.net.URLDecoder;
+import java.net.URLEncoder;
+import java.sql.Timestamp;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.UUID;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.GZIPOutputStream;
+
+import org.apache.commons.codec.DecoderException;
+import org.apache.commons.lang3.CharEncoding;
+
+public class CommonUtils {
+    private final static DateTimeFormatter DEFAULT_DATETIME_FORMAT = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
+    public final static DateTimeFormatter DEFAULT_DATETIME_FORMAT2 = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");    
+
+    public static String urlDecode(String URL) {
+
+        String urlString = "";
+        try {
+            urlString = URLDecoder.decode(URL, CharEncoding.UTF_8);
+        } catch (UnsupportedEncodingException e) {
+        }
+
+        return urlString;
+
+    }
+
+    public static String urlEncode(String URL) {
+
+        String urlString = "";
+        try {
+            urlString = URLEncoder.encode(URL, CharEncoding.UTF_8);
+        } catch (UnsupportedEncodingException e) {
+        }
+
+        return urlString;
+
+    }
+
+    public static String unescape(String src) {
+        // src = src.replaceAll("&", "&amp;");
+        // src = src.replaceAll("<", "&lt;");
+        // src = src.replaceAll(">", "&gt;");
+
+        StringBuffer tmp = new StringBuffer();
+        tmp.ensureCapacity(src.length());
+        int count = 0;
+        int lastPos = 0, pos = 0;
+        String re = "";
+        while (lastPos < src.length()) {
+            pos = src.indexOf("%", lastPos);
+            if (pos == lastPos) {
+                if (src.charAt(pos + 1) == 'u') {
+                    count = 1;
+                    break;
+                } else {
+                    lastPos++;
+                }
+            } else {
+                lastPos++;
+            }
+        }
+
+        if (count == 1) {
+            re = unescapeUnicode(src);
+        } else {
+            try {
+                re = URLDecoder.decode(src, "UTF-8");
+            } catch (UnsupportedEncodingException e) {
+                e.printStackTrace();
+            }
+        }
+
+        return re;
+    }
+
+    public static String unescapeUnicode(String src) {
+        StringBuffer tmp = new StringBuffer();
+        tmp.ensureCapacity(src.length());
+        int lastPos = 0, pos = 0;
+        char ch;
+        while (lastPos < src.length()) {
+            pos = src.indexOf("%", lastPos);
+            if (pos == lastPos) {
+                if (src.charAt(pos + 1) == 'u') {
+                    // System.out.println(src.substring(pos + 2, pos + 6));
+                    ch = (char) Integer.parseInt(src.substring(pos + 2, pos + 6), 16);
+                    tmp.append(ch);
+                    lastPos = pos + 6;
+                } else {
+                    ch = (char) Integer.parseInt(src.substring(pos + 1, pos + 3), 16);
+                    tmp.append(ch);
+                    lastPos = pos + 3;
+                }
+            } else {
+                if (pos == -1) {
+                    // System.out.println("1 :" + src.substring(lastPos));
+                    tmp.append(src.substring(lastPos));
+                    lastPos = src.length();
+                } else {
+                    // System.out.println("2 : " + src.substring(lastPos, pos));
+                    tmp.append(src.substring(lastPos, pos).replace("+", " "));
+
+                    // System.out.println("2 : " + src.substring(lastPos, pos));
+                    lastPos = pos;
+                }
+            }
+        }
+        return tmp.toString();
+    }
+
+    public static String decompressGzip(byte[] compressedData) throws IOException {
+        byte[] buffer = new byte[compressedData.length];
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        GZIPInputStream in = new GZIPInputStream(new ByteArrayInputStream(compressedData));
+        for (int bytesRead = 0; bytesRead != -1; bytesRead = in.read(buffer)) {
+            out.write(buffer, 0, bytesRead);
+        }
+        return new String(out.toByteArray(), "UTF-8");
+    }
+
+
+    public static byte[] compressGzip(String input) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        GZIPOutputStream in = new GZIPOutputStream(out);
+        in.write(input.getBytes("UTF-8"));
+        in.close();
+
+        return out.toByteArray();
+    }
+
+    public static byte[] compressGzipFromByte(byte[] input) throws IOException {
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        GZIPOutputStream in = new GZIPOutputStream(out);
+        in.write(input);
+        in.close();
+
+        return out.toByteArray();
+    }
+
+    public static String millisecondsRemove(Timestamp timestamp) {
+        if (timestamp == null)
+            return null;
+        String ts = timestamp.toString();
+        return ts.substring(0, ts.indexOf("."));
+    }
+
+    public static String uuid() {
+        return UUID.randomUUID().toString().replace("-", "");
+    }
+
+
+    public static Timestamp getDefaultStringDate(String s) {
+        if ("".equals(s))
+            return null;
+
+        LocalDateTime date = LocalDateTime.parse(s, DEFAULT_DATETIME_FORMAT);
+        return Timestamp.valueOf(date);
+
+    }
+    
+    //널값체크 - Number
+    public static String nchk2(String str) {
+    	   return (str==null || str.equals(""))?"0":str;
+    }    
+
+    public static String URLEncodeUnicode(String A){
+    	String NC[] = {"A", "B", "C", "D",  "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z" ,
+    	               "a", "b", "c", "d",  "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", 
+    	               "*", "@", ".", "_", "-", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "$", "!", "''", "(", ")"};
+        
+        int X = 0;
+        int Y = 0;
+        int Z = 0;
+        int AC = 0;
+        boolean Flag = false;
+        StringBuilder Temp = new StringBuilder();
+        String Tmp = "";
+        char Tmp2 = 0;
+        
+        for(X=0; X < A.length(); X++){
+            
+            Tmp2 = 0;
+            if( A.charAt(X) == 32){
+                Temp.append("+");
+                continue;
+            }else{
+                Flag = false;
+                for (int I=0; I < NC.length;I++) {
+                    Tmp2 = NC[I].charAt(0);
+                    if ( A.charAt(X) == Tmp2 ) {
+                        Temp.append(A.charAt(X));
+                        Flag = true;
+                        break;
+                    }
+                }
+            } if (Flag == false) {
+    	      Y = A.charAt(X);
+    	      if ( (65248 <= Y) && (65248 + 127 >= Y)) {
+    	        AC = (A.charAt(X)) - 65248;
+    	        Temp.append(AC);
+    	        continue;
+    	      }
+    	      if( Y > 255 ) {
+    	        Z = 4;
+    	      } else {
+    	        Z = 2;
+    	      }
+    	      Tmp = "";
+    	      if( Z == 2 ) {
+    	        Temp.append("%");  
+    	        Tmp = Tmp.format("%02X", Y);
+    	        Temp.append(Tmp);
+    	      }else{
+                Temp.append("%u");  
+                Tmp = Tmp.format("%04X", Y);
+                Temp.append(Tmp);
+    	      }
+            }
+        }
+        return Temp.toString();
+    }
+    
+    public static String URLDecodeUnicode(String AStr) throws UnsupportedEncodingException, DecoderException{
+	    int i = 0;
+	    int j = 0;
+	    String Result = "";
+	    byte[] Unicode = null;
+	    String Temp = new String("");
+	    
+	    if (AStr.length() == 0) {
+	        return "";
+	    }
+	    
+	    do 
+	    {
+	        j = 1;
+	        if ( AStr.charAt(i) == "%".charAt(0) ) {
+	            if (i + 1 < AStr.length()) {
+	                if ( AStr.charAt(i + 1) == "u".charAt(0)) {
+	                    if (i + 5 <= AStr.length()) {
+   
+	                        if ( IsInteger(AStr, i + 2, 4) ) {
+	                            Temp = AStr.substring(i + 2 , i + 6);
+	                            Temp = "%" + Temp.substring(0,2) + "%" +Temp.substring(2,Temp.length()) ;
+	                            Temp = URLDecoder.decode(Temp, "utf-16");
+	                            Result = Result.concat(Temp);
+	                            j = 6;
+	                        }else{
+	                            Result = Result + AStr.charAt(i);
+	                        }
+	                    }else{
+	                          Result = Result + AStr.charAt(i);
+	                    }
+	                }else if (i + 2 <= AStr.length()) {
+	                    if (IsInteger(AStr, i + 1, 2)) {
+                            Temp = AStr.substring(i + 1 , i + 3);
+                            Temp = "%" + Temp.substring(0,Temp.length()) ;
+                            Temp = URLDecoder.decode(Temp, "utf-8");
+	                        Result = Result.concat(Temp);
+	                        j = 3;
+	                    }else{
+	                        Result = Result + AStr.charAt(i);
+	                    }
+	                }else{
+	                    Result = Result + AStr.charAt(i);
+	                }
+	            }
+	            else{
+		            Result = Result + AStr.charAt(i);
+		        }
+	        }else if (AStr.charAt(i) == '+') {
+	            Result = Result + ' ';
+	        }else{
+	            Result = Result + AStr.charAt(i);
+	        }
+	        i = i + j;
+	    }while ( i < AStr.length() );
+        return Result;
+	}	
+    
+    public static boolean IsInteger(String PStr, int StartPos, int StrLength){
+	    String HexInt[] = {"A", "B", "C", "D",  "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z" ,
+                "a", "b", "c", "d",  "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", 
+                "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"};
+        boolean Flag = true;
+        boolean Flag2 = false;
+        
+        if ( (StartPos + StrLength - 1) > PStr.length() ) {
+          Flag = true;
+          return Flag;
+        }
+        
+        for (int i = StartPos;i < StartPos + StrLength - 1;i++){
+            Flag2 = false;
+            for (int j = 0; j < HexInt.length; j++){
+               if ( PStr.charAt(i) == HexInt[j].charAt(0) ) {
+                   Flag2 = true;
+               }
+            }
+            if (Flag2 == false) {
+                Flag = false;
+                return false;
+            }
+        }
+        return Flag;
+	}
+    
+    public static String byteArrayToHex(byte[] ba) {
+	    if (ba == null || ba.length == 0) {
+	        return null;
+	    }
+	    StringBuffer sb = new StringBuffer(ba.length * 2);
+	    String hexNumber;
+	    for (int x = 0; x < ba.length; x++) {
+	        hexNumber = "0" + Integer.toHexString(0xff & ba[x]);
+	        sb.append(hexNumber.substring(hexNumber.length() - 2));
+	    }
+	    return sb.toString();
+	}
+    
+    public static byte[] hexToByteArray(String hex) {
+	    if (hex == null || hex.length() == 0) {
+	        return null;
+	    }
+	    byte[] ba = new byte[hex.length() / 2];
+	    for (int i = 0; i < ba.length; i++) {
+	        ba[i] = (byte) Integer.parseInt(hex.substring(2 * i, 2 * i + 2), 16);
+	    }
+	    return ba;
+	}
+
+}

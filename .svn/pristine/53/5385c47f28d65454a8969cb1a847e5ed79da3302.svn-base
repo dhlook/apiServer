@@ -1,0 +1,10 @@
+package com.slamdh.apiserver.mapper;
+
+import java.util.ArrayList;
+import java.util.Map;
+
+public interface BlackListMapper {
+
+	public ArrayList<Map<String, String>> getBlackList(Map<String, String> type)throws Exception ;
+	
+}

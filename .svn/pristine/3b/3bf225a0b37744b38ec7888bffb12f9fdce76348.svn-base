@@ -1,0 +1,832 @@
+package com.slamdh.apiserver.service;
+
+
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
+  
+
+
+
+
+import org.apache.commons.codec.binary.Base64;
+import org.apache.commons.lang3.StringUtils;
+import org.apache.http.nio.entity.NStringEntity;
+import org.elasticsearch.action.search.SearchRequest;
+import org.elasticsearch.action.search.SearchResponse;
+import org.elasticsearch.client.RestHighLevelClient;
+import org.elasticsearch.index.query.BoolQueryBuilder;
+import org.elasticsearch.index.query.QueryBuilder;
+import org.elasticsearch.index.query.QueryBuilders;
+import org.elasticsearch.script.Script;
+import org.elasticsearch.script.ScriptType;
+import org.elasticsearch.search.SearchHit;
+import org.elasticsearch.search.aggregations.AggregationBuilders;
+import org.elasticsearch.search.aggregations.BucketOrder;
+import org.elasticsearch.search.aggregations.bucket.filter.Filter;
+import org.elasticsearch.search.aggregations.bucket.filter.FilterAggregationBuilder;
+import org.elasticsearch.search.aggregations.bucket.histogram.DateHistogramAggregationBuilder;
+import org.elasticsearch.search.aggregations.bucket.histogram.DateHistogramInterval;
+import org.elasticsearch.search.aggregations.bucket.histogram.Histogram;
+import org.elasticsearch.search.aggregations.bucket.terms.Terms;
+import org.elasticsearch.search.aggregations.bucket.terms.Terms.Bucket;
+import org.elasticsearch.search.aggregations.bucket.terms.TermsAggregationBuilder;
+import org.elasticsearch.search.aggregations.metrics.sum.Sum;
+import org.elasticsearch.search.aggregations.metrics.tophits.TopHits;
+import org.elasticsearch.search.builder.SearchSourceBuilder;
+import org.json.simple.JSONArray;
+import org.json.simple.JSONObject;
+import org.json.simple.parser.JSONParser;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import com.slamdh.apiserver.AppName;
+import com.slamdh.apiserver.ElasticsearchConfiguration;
+import com.slamdh.apiserver.mapper.AgentMapper;
+import com.slamdh.apiserver.mapper.CustomMapper;
+import com.slamdh.apiserver.mapper.PolicyMapper;
+import com.slamdh.apiserver.utils.CommonUtils;
+import com.google.gson.Gson;
+
+@Service
+public class MediaModuleService {
+	
+	static final Logger logger = LoggerFactory.getLogger(PrintModuleService.class);
+	
+	@Autowired
+	ElasticsearchConfiguration esConfig;
+	@Autowired
+	AgentMapper agentMapper;
+	@Autowired
+	PolicyMapper policyMapper;
+	@Autowired
+	CustomMapper customMapper;
+	
+	@Value("${spring.data.elasticsearch.index}")
+	String index;
+	@Value("${spring.data.elasticsearch.type}")
+	String type;	
+	
+	
+	@SuppressWarnings("unchecked")
+	public Map<String, Object> getDashBoard(Map<String, Object> param) {
+
+		Map<String, Object> resultMap = new HashMap<String, Object>();
+		
+		String customId = (String)param.get("customId");
+		
+				
+		try {							
+				// 유출 발생 의심 사용자 / 비율 (DB 데이터 조회)
+				Map<String, Object> policyApply = agentMapper.getMediaconPolicyApplyAgentCount(customId);
+				int ExceptUSBCnt = agentMapper.getAgentExceptUSBMappingCount(customId);
+							
+				// 유출이 가능한 사용자 중 실제 유출한 사용자 수
+				String startTime = (String)param.get("startTime");
+				String endTime = (String)param.get("endTime");
+				String startHour = startTime.split(":")[0];
+				String startMin = startTime.split(":")[1];
+				String endHour = endTime.split(":")[0];
+				String endMin = endTime.split(":")[1];			
+				
+				BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+				boolQuery.must(QueryBuilders.termQuery("customerId", customId));
+				boolQuery.must(QueryBuilders.termQuery("appName", AppName.REALTIME_FILE_LOG));
+				boolQuery.must(QueryBuilders.termsQuery("outflowType", "1","2","3")); // 일단 1,2 데이터가 없으서 저거 추가 함				 		
+				boolQuery.must(QueryBuilders.rangeQuery("logDate").gte("now-7d/d"));			
+								
+				// 외부 유출 차단 사용자 기준으로 실제 유출이 발생한 사용자
+				String agent_id_arr[] =  policyApply.get("agentList").toString().split(",");				
+				
+				// 유출 가능성이 존재하는 사용자 중 실제 유출한 사용자 			
+//				FilterAggregationBuilder outflowAgent = AggregationBuilders.filter("outflowAgent", QueryBuilders.termsQuery("agentId", "VBa26a2019-a03728ab","acbc"))
+//						.subAggregation(AggregationBuilders.terms("agentCnt").field("agentId").size(1000));						 
+				
+				FilterAggregationBuilder outflowAgent = AggregationBuilders.filter("outflowAgent", QueryBuilders.termsQuery("agentId", agent_id_arr))
+						.subAggregation(AggregationBuilders.terms("agentCnt").field("agentId").size(1000));				
+				 	 
+				// 일반파일 , 도면파일에 대한 유출 흔적 
+				DateHistogramAggregationBuilder graphAggs = AggregationBuilders.dateHistogram("graph").field("logDate").dateHistogramInterval(DateHistogramInterval.DAY).format("MM.dd")
+						.subAggregation(AggregationBuilders.filter("dwg", QueryBuilders.termQuery("ext", "dwg")))					
+						.subAggregation(AggregationBuilders.filter("allow", QueryBuilders.termQuery("isBlock", "0")));				
+				
+				// 외부 유출 사용자 Top 5 
+				TermsAggregationBuilder top5AggsAgent = AggregationBuilders.terms("top5agent").field("agentId").order(BucketOrder.key(false)).size(5)
+						.subAggregation(AggregationBuilders.topHits("agentName").size(1).fetchSource(new String[] {"agentName", "agentDeptName"}, null));
+				
+				// 외부 유출 유형별 Top 5 
+				TermsAggregationBuilder top5AggsType = AggregationBuilders.terms("top5type").field("outflowSubType").order(BucketOrder.key(false))
+						.subAggregation(AggregationBuilders.topHits("outflowSubType").size(1).fetchSource(new String[] {"outflowType", "outflowSubType"}, null));				
+				
+                // 업무시간 외 유출				
+				String script = "int time = Integer.parseInt(doc.logDate.value.toString('HHmm')); time >= "+startHour+startMin+" && time <= " + endHour+endMin;
+				FilterAggregationBuilder workAggs = AggregationBuilders.filter("work", 
+						QueryBuilders.scriptQuery(new Script(ScriptType.INLINE, "painless", script, Collections.emptyMap())));									
+															 					
+				// ES 수행 
+				RestHighLevelClient client = esConfig.getRestClient();				
+				SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery)
+						                                                        .aggregation(top5AggsAgent)
+						                                                        .aggregation(top5AggsType)
+						                                                        .aggregation(workAggs)		
+						                                                        .aggregation(outflowAgent)						                                                        
+						                                                        .aggregation(graphAggs).size(0);						
+				SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);			
+				SearchResponse searchResponse = new SearchResponse();
+				try {
+					searchResponse = client.search(searchRequest);
+				} catch(Exception e) {
+					logger.info(e.getMessage());
+				}			
+				
+  	
+				// 유출 발생 추이 차트
+				Histogram graph = searchResponse.getAggregations().get("graph");
+				ArrayList<HashMap<String, Object>> graphList = new ArrayList<HashMap<String, Object>>();
+				for (Histogram.Bucket b : graph.getBuckets()) {
+					HashMap<String, Object> map = new HashMap<String, Object>();
+					
+					Filter dwg = b.getAggregations().get("dwg");				
+					Filter allow = b.getAggregations().get("allow");
+		
+					map.put("key", b.getKeyAsString());
+					map.put("dwg", dwg.getDocCount());
+					map.put("allow", allow.getDocCount());
+					graphList.add(map);
+				}		
+				
+				// 유출 사용자 Top 5 
+				Terms top5 = searchResponse.getAggregations().get("top5agent");
+				ArrayList<HashMap<String, Object>> topList = new ArrayList<HashMap<String, Object>>();
+				for(Bucket b : top5.getBuckets()) {
+					HashMap<String, Object> map = new HashMap<String, Object>();
+					
+					TopHits topHit = b.getAggregations().get("agentName");
+					for(SearchHit hit : topHit.getHits()) {
+						map.put("agentName", hit.getSourceAsMap().get("agentName"));
+						map.put("agentDeptName", hit.getSourceAsMap().get("agentDeptName"));
+					}				
+					
+					map.put("totalCnt", b.getDocCount());
+					topList.add(map);			
+				}	
+				
+				// 유출 유형별 Top 5   
+				int top5check = 0;
+				long outflow_share = 0;
+				Terms top5type = searchResponse.getAggregations().get("top5type");
+				ArrayList<HashMap<String, Object>> topListType = new ArrayList<HashMap<String, Object>>();
+				for(Bucket b : top5type.getBuckets()) {
+					
+					HashMap<String, Object> map = new HashMap<String, Object>();					
+					TopHits topHit = b.getAggregations().get("outflowSubType");
+									
+						for(SearchHit hit : topHit.getHits()) {							
+							map.put("outflowType", hit.getSourceAsMap().get("outflowType"));
+							map.put("outflowSubType", hit.getSourceAsMap().get("outflowSubType"));													
+							
+							if (hit.getSourceAsMap().get("outflowSubType").toString().equals("4")) {
+								outflow_share =  b.getDocCount();
+							}
+						}				
+												
+						map.put("totalCnt", b.getDocCount());						
+						if (top5check < 5) {						
+							topListType.add(map);				
+							top5check ++;		
+					}					 
+				}		
+				
+
+				
+				// 업무시간 외 유출
+				long totalCnt = searchResponse.getHits().totalHits;				
+				Filter work = searchResponse.getAggregations().get("work");
+				
+				// 정책 미적용 또는 정책 적용 사용자 중 외부로 문서 유출한 사용자 
+				Filter outflowAgent1 = searchResponse.getAggregations().get("outflowAgent");								
+				Terms outflowAgent2 = outflowAgent1.getAggregations().get("agentCnt");		
+				long outAgentCnt =  outflowAgent2.getBuckets().size();
+				
+				// 데이터 전송
+				resultMap.put("outflowgraph", graphList);
+				resultMap.put("outflowusertopList", topList);				
+				resultMap.put("outflowtypetopList", topListType);
+				resultMap.put("totalCnt", totalCnt);				
+				resultMap.put("workHourCnt", work.getDocCount());	
+				resultMap.put("policyApply", policyApply);				
+				resultMap.put("outAgentCnt", outAgentCnt);				
+				resultMap.put("ExceptUSBCnt", ExceptUSBCnt);
+				resultMap.put("outflow_share", outflow_share);
+				
+				
+				 
+			} catch (Exception e) {
+				logger.info(e.getMessage());
+			}
+			     		
+		
+		return resultMap;
+	}	
+
+	@SuppressWarnings("unchecked")
+	public Map<String, Object> getLogView_usb(Map<String, Object> param) {
+
+		Map<String, Object> resultMap = new HashMap<String, Object>();		
+		String customId = (String)param.get("customId");
+		
+		try {													
+			// 유출이 가능한 사용자 중 실제 유출한 사용자 수
+			String startTime = (String)param.get("startTime");
+			String endTime = (String)param.get("endTime");
+			String startHour = startTime.split(":")[0];
+			String startMin = startTime.split(":")[1];
+			String endHour = endTime.split(":")[0];
+			String endMin = endTime.split(":")[1];			
+			
+			BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+			boolQuery.must(QueryBuilders.termQuery("customerId", customId));
+			boolQuery.must(QueryBuilders.termQuery("appName", AppName.REALTIME_FILE_LOG));
+			boolQuery.must(QueryBuilders.termsQuery("outflowType", "1")); // 일단 1,2 데이터가 없으서 저거 추가 함				 		
+			boolQuery.must(QueryBuilders.rangeQuery("logDate").gte("now-7d/d"));						
+			 
+			// 일반파일 , 도면파일에 대한 유출 흔적 
+			DateHistogramAggregationBuilder graphAggs = AggregationBuilders.dateHistogram("graph").field("logDate")
+					.dateHistogramInterval(DateHistogramInterval.DAY).format("MM.dd")
+					.subAggregation(AggregationBuilders.filter("dwg", QueryBuilders.termQuery("ext", "dwg")))					
+					.subAggregation(AggregationBuilders.filter("allow", QueryBuilders.termQuery("isBlock", "0")));
+			
+			// 외부 유출 사용자 Top 5 
+			TermsAggregationBuilder top5AggsAgent = AggregationBuilders.terms("top5agent").field("agentId").order(BucketOrder.key(false)).size(5)
+					.subAggregation(AggregationBuilders.topHits("agentName").size(1).fetchSource(new String[] {"agentName", "agentDeptName"}, null));
+				
+			
+			// 키워드 개인정보 건수 카운트  
+			DateHistogramAggregationBuilder graphAggsKeyword = AggregationBuilders.dateHistogram("Keywordgraph").field("logDate")
+					.dateHistogramInterval(DateHistogramInterval.DAY).format("MM.dd")
+					.subAggregation(AggregationBuilders.terms("keywordCnt").field("keywordDetail"))
+					.subAggregation(AggregationBuilders.terms("peCnt").field("peDetail"))
+					;				
+										
+								
+			
+			// ES 수행 
+			RestHighLevelClient client = esConfig.getRestClient();				
+			SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery)
+																			.aggregation(top5AggsAgent)	
+																			.aggregation(graphAggsKeyword)																			
+					                                                        .aggregation(graphAggs).size(0);			;
+			
+			SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);			
+			SearchResponse searchResponse = new SearchResponse();
+			try {
+				searchResponse = client.search(searchRequest);
+			} catch(Exception e) {
+				logger.info(e.getMessage());
+			}	
+			
+			// 유출 발생 추이 차트
+			Histogram graph = searchResponse.getAggregations().get("graph");
+			ArrayList<HashMap<String, Object>> graphList = new ArrayList<HashMap<String, Object>>();
+			for (Histogram.Bucket b : graph.getBuckets()) {
+				HashMap<String, Object> map = new HashMap<String, Object>();
+				
+				Filter dwg = b.getAggregations().get("dwg");				
+				Filter allow = b.getAggregations().get("allow");
+	
+				map.put("key", b.getKeyAsString());
+				map.put("dwg", dwg.getDocCount());
+				map.put("allow", allow.getDocCount());
+				graphList.add(map);
+			}	
+			
+			
+			// 유출 발생 추이 차트
+			Histogram graphKeyword = searchResponse.getAggregations().get("Keywordgraph");
+			ArrayList<HashMap<String, Object>> KeywordgraphList = new ArrayList<HashMap<String, Object>>();
+			for (Histogram.Bucket b : graphKeyword.getBuckets()) {
+				HashMap<String, Object> map = new HashMap<String, Object>();
+				
+				// 	실제 개인정보, 키워드문서를 오픈해서 각 그룹별로 작업을 해야 함
+				// 개인정보의 경우 묶어서 처리를 하지만 키워드는,,, 묶어서 처리가 가능할지 의문
+				Terms keywordCnt = b.getAggregations().get("keywordCnt");
+				long keywordTotCnt = 0;
+				for (Bucket keyword : keywordCnt.getBuckets()) {
+					if (!keyword.getKey().toString().equals("")) {
+						keywordTotCnt ++;	
+					}
+				}
+				
+//				for (Bucket keyword : keywordCnt.getBuckets()) {
+//					if (!keyword.getKey().toString().equals("")) {
+//						System.out.println( "keyword get key ");
+//						System.out.println( keyword.getKey().toString());
+//						System.out.println( keyword.getDocCount());
+//						
+//						String[] tempKey = keyword.getKey().toString().split(",");																
+//						
+//						for (String key : tempKey ){
+//							String keyCount = key.split(",")[2];	
+//							long docKeyCnt = Long.parseLong(keyCount) *  keyword.getDocCount();							
+//						}
+//					}					
+//				}
+				
+				
+				Terms peCnt = b.getAggregations().get("peCnt");
+				long peTotCnt = 0;
+				for (Bucket keyPe : peCnt.getBuckets()) {
+					if (!keyPe.getKey().toString().equals("")) {
+						peTotCnt ++;	
+					}
+				}				
+ 	
+				map.put("key", b.getKeyAsString());
+				map.put("keywordCnt", keywordTotCnt);
+				map.put("peCnt", peTotCnt);				
+				KeywordgraphList.add(map);
+			}				
+			
+			// 유출 사용자 Top 5 
+			Terms top5 = searchResponse.getAggregations().get("top5agent");
+			ArrayList<HashMap<String, Object>> topList = new ArrayList<HashMap<String, Object>>();
+			for(Bucket b : top5.getBuckets()) {
+				HashMap<String, Object> map = new HashMap<String, Object>();
+				
+				TopHits topHit = b.getAggregations().get("agentName");
+				for(SearchHit hit : topHit.getHits()) {
+					map.put("agentName", hit.getSourceAsMap().get("agentName"));
+					map.put("agentDeptName", hit.getSourceAsMap().get("agentDeptName"));
+				}				
+				
+				map.put("totalCnt", b.getDocCount());
+				topList.add(map);			
+			}				
+
+			
+			resultMap.put("outflowgraph", graphList);
+			resultMap.put("outflowusertopList", topList);		
+			resultMap.put("KeywordgraphList", KeywordgraphList);			
+				
+			
+		} catch (Exception e) {
+			logger.info(e.getMessage());
+		}	 
+		
+				
+		return resultMap;		
+		
+	}		
+	
+	
+
+	@SuppressWarnings("unchecked")
+	public Map<String, Object> getLogView_all(Map<String, Object> param) {
+
+		Map<String, Object> resultMap = new HashMap<String, Object>();		
+		String customId = (String)param.get("customId");
+		
+		try {													
+			// 유출이 가능한 사용자 중 실제 유출한 사용자 수
+			String startTime = (String)param.get("startTime");
+			String endTime = (String)param.get("endTime");  
+			String startHour = startTime.split(":")[0];
+			String startMin = startTime.split(":")[1];
+			String endHour = endTime.split(":")[0];
+			String endMin = endTime.split(":")[1];			
+			
+			BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+			boolQuery.must(QueryBuilders.termQuery("customerId", customId));
+			boolQuery.must(QueryBuilders.termQuery("appName", AppName.REALTIME_FILE_LOG));
+			boolQuery.must(QueryBuilders.termsQuery("outflowType",   "1", "2", "3")); 				 		
+			boolQuery.must(QueryBuilders.rangeQuery("logDate").gte("now-7d/d"));						
+			 
+			
+			// 외부 유출 사용자 Top 5 
+			TermsAggregationBuilder top5AggsAgent = AggregationBuilders.terms("top5agent").field("agentId").order(BucketOrder.key(false)).size(5)
+					.subAggregation(AggregationBuilders.topHits("agentName").size(1).fetchSource(new String[] {"agentName", "agentDeptName"}, null));
+			
+			// 네트워크 유형별 유출 추이 차트
+			DateHistogramAggregationBuilder graphAggs = AggregationBuilders.dateHistogram("graph").field("logDate")
+					.dateHistogramInterval(DateHistogramInterval.DAY).format("MM.dd")
+					.subAggregation(AggregationBuilders.terms("outflowsub").field("outflowSubType"));									
+			
+			// 키워드 개인정보 건수 카운트  
+			DateHistogramAggregationBuilder graphAggsKeyword = AggregationBuilders.dateHistogram("Keywordgraph").field("logDate")
+					.dateHistogramInterval(DateHistogramInterval.DAY).format("MM.dd")
+					.subAggregation(AggregationBuilders.terms("keywordCnt").field("keywordDetail"))
+					.subAggregation(AggregationBuilders.terms("peCnt").field("peDetail"))
+					;				
+										
+								
+			
+			// ES 수행 
+			RestHighLevelClient client = esConfig.getRestClient();				
+			SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery)
+																			.aggregation(top5AggsAgent)	
+																			.aggregation(graphAggsKeyword)																			
+					                                                        .aggregation(graphAggs).size(0);			;
+			
+			SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);			
+			SearchResponse searchResponse = new SearchResponse();
+			try {
+				searchResponse = client.search(searchRequest);
+			} catch(Exception e) {
+				logger.info(e.getMessage());
+			}	
+			
+			// 유출 발생 추이 차트
+			
+			Histogram graph = searchResponse.getAggregations().get("graph");
+			ArrayList<HashMap<String, Object>> graphList = new ArrayList<HashMap<String, Object>>();
+			for (Histogram.Bucket b : graph.getBuckets()) {
+				HashMap<String, Object> map = new HashMap<String, Object>();
+				
+				Terms outflowSub = b.getAggregations().get("outflowsub");
+				for (Bucket sbulist : outflowSub.getBuckets()) {
+					if (!sbulist.getKey().toString().equals("")) {					
+						switch(sbulist.getKey().toString()) {
+							case "1" : { map.put("a1", sbulist.getDocCount());   break;}
+							case "2" : { map.put("a2", sbulist.getDocCount());   break;}
+							case "3" : { map.put("a3", sbulist.getDocCount());   break;}
+							case "4" : { map.put("a4", sbulist.getDocCount());   break;}
+							case "5" : { map.put("a5", sbulist.getDocCount());   break;}						
+							case "101" : { map.put("a101", sbulist.getDocCount());   break;} 
+							case "102" : { map.put("a102", sbulist.getDocCount());   break;} 
+							case "103" : { map.put("a103", sbulist.getDocCount());   break;} 
+							case "104" : { map.put("a104", sbulist.getDocCount());   break;} 
+							case "105" : { map.put("a105", sbulist.getDocCount());   break;} 
+							case "106" : { map.put("a106", sbulist.getDocCount());   break;} 
+							case "107" : { map.put("a107", sbulist.getDocCount());   break;} 
+							case "108" : { map.put("a108", sbulist.getDocCount());   break;}
+							default : { map.put("aetc", sbulist.getDocCount());   break;} 
+						}						  						
+					}
+				}
+				
+				map.put("key", b.getKeyAsString());
+				graphList.add(map);
+			}	
+			
+			
+			// 유출 발생 추이 차트
+			Histogram graphKeyword = searchResponse.getAggregations().get("Keywordgraph");
+			ArrayList<HashMap<String, Object>> KeywordgraphList = new ArrayList<HashMap<String, Object>>();
+			for (Histogram.Bucket b : graphKeyword.getBuckets()) {
+				HashMap<String, Object> map = new HashMap<String, Object>();
+				
+				// 	실제 개인정보, 키워드문서를 오픈해서 각 그룹별로 작업을 해야 함
+				// 개인정보의 경우 묶어서 처리를 하지만 키워드는,,, 묶어서 처리가 가능할지 의문
+				Terms keywordCnt = b.getAggregations().get("keywordCnt");
+				long keywordTotCnt = 0;
+				for (Bucket keyword : keywordCnt.getBuckets()) {
+					if (!keyword.getKey().toString().equals("")) {
+						keywordTotCnt ++;	
+					}
+				}
+				
+//				for (Bucket keyword : keywordCnt.getBuckets()) {
+//					if (!keyword.getKey().toString().equals("")) {
+//						System.out.println( "keyword get key ");
+//						System.out.println( keyword.getKey().toString());
+//						System.out.println( keyword.getDocCount());
+//						
+//						String[] tempKey = keyword.getKey().toString().split(",");																
+//						
+//						for (String key : tempKey ){
+//							String keyCount = key.split(",")[2];	
+//							long docKeyCnt = Long.parseLong(keyCount) *  keyword.getDocCount();							
+//						}
+//					}					
+//				}
+				
+				
+				Terms peCnt = b.getAggregations().get("peCnt");
+				long peTotCnt = 0;
+				for (Bucket keyPe : peCnt.getBuckets()) {
+					if (!keyPe.getKey().toString().equals("")) {
+						peTotCnt ++;	
+					}
+				}				
+ 	
+				map.put("key", b.getKeyAsString());
+				map.put("keywordCnt", keywordTotCnt);
+				map.put("peCnt", peTotCnt);				
+				KeywordgraphList.add(map);
+			}				
+			
+			// 유출 사용자 Top 5 
+			Terms top5 = searchResponse.getAggregations().get("top5agent");
+			ArrayList<HashMap<String, Object>> topList = new ArrayList<HashMap<String, Object>>();
+			for(Bucket b : top5.getBuckets()) {
+				HashMap<String, Object> map = new HashMap<String, Object>();
+				
+				TopHits topHit = b.getAggregations().get("agentName");
+				for(SearchHit hit : topHit.getHits()) {
+					map.put("agentName", hit.getSourceAsMap().get("agentName"));
+					map.put("agentDeptName", hit.getSourceAsMap().get("agentDeptName"));
+				}				
+				
+				map.put("totalCnt", b.getDocCount());
+				topList.add(map);			
+			}				
+
+			
+			resultMap.put("outflowgraph", graphList);
+			resultMap.put("outflowusertopList", topList);		
+			resultMap.put("KeywordgraphList", KeywordgraphList);			
+				
+			
+		} catch (Exception e) {
+			logger.info(e.getMessage());
+		}	 
+		
+				
+		return resultMap;		
+		
+	}			
+			
+	
+	
+//	getLogView_netl	
+	@SuppressWarnings("unchecked")
+	public Map<String, Object> getLogView_net(Map<String, Object> param) {
+
+		Map<String, Object> resultMap = new HashMap<String, Object>();		
+		String customId = (String)param.get("customId");
+		
+		try {													
+			// 유출이 가능한 사용자 중 실제 유출한 사용자 수
+			String startTime = (String)param.get("startTime");
+			String endTime = (String)param.get("endTime");  
+			String startHour = startTime.split(":")[0];
+			String startMin = startTime.split(":")[1];
+			String endHour = endTime.split(":")[0];
+			String endMin = endTime.split(":")[1];			
+			
+			BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+			boolQuery.must(QueryBuilders.termQuery("customerId", customId));
+			boolQuery.must(QueryBuilders.termQuery("appName", AppName.REALTIME_FILE_LOG));
+			boolQuery.must(QueryBuilders.termsQuery("outflowType",   "2")); 				 		
+			boolQuery.must(QueryBuilders.rangeQuery("logDate").gte("now-7d/d"));						
+			 
+			
+			// 외부 유출 사용자 Top 5 
+			TermsAggregationBuilder top5AggsAgent = AggregationBuilders.terms("top5agent").field("agentId").order(BucketOrder.key(false)).size(5)
+					.subAggregation(AggregationBuilders.topHits("agentName").size(1).fetchSource(new String[] {"agentName", "agentDeptName"}, null));
+			
+			// 네트워크 유형별 유출 추이 차트
+			DateHistogramAggregationBuilder graphAggs = AggregationBuilders.dateHistogram("graph").field("logDate")
+					.dateHistogramInterval(DateHistogramInterval.DAY).format("MM.dd")
+					.subAggregation(AggregationBuilders.terms("outflowsub").field("outflowSubType"));									
+			
+			// 키워드 개인정보 건수 카운트  
+			DateHistogramAggregationBuilder graphAggsKeyword = AggregationBuilders.dateHistogram("Keywordgraph").field("logDate")
+					.dateHistogramInterval(DateHistogramInterval.DAY).format("MM.dd")
+					.subAggregation(AggregationBuilders.terms("keywordCnt").field("keywordDetail"))
+					.subAggregation(AggregationBuilders.terms("peCnt").field("peDetail"))
+					;				
+										
+								
+			
+			// ES 수행 
+			RestHighLevelClient client = esConfig.getRestClient();				
+			SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery)
+																			.aggregation(top5AggsAgent)	
+																			.aggregation(graphAggsKeyword)																			
+					                                                        .aggregation(graphAggs).size(0);			;
+			
+			SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);			
+			SearchResponse searchResponse = new SearchResponse();
+			try {
+				searchResponse = client.search(searchRequest);
+			} catch(Exception e) {
+				logger.info(e.getMessage());
+			}	
+			
+			// 유출 발생 추이 차트
+			
+			Histogram graph = searchResponse.getAggregations().get("graph");
+			ArrayList<HashMap<String, Object>> graphList = new ArrayList<HashMap<String, Object>>();
+			for (Histogram.Bucket b : graph.getBuckets()) {
+				HashMap<String, Object> map = new HashMap<String, Object>();
+				
+				Terms outflowSub = b.getAggregations().get("outflowsub");
+				for (Bucket sbulist : outflowSub.getBuckets()) {
+					if (!sbulist.getKey().toString().equals("")) {					
+						switch(sbulist.getKey().toString()) {				
+							case "101" : { map.put("a101", sbulist.getDocCount());   break;} 
+							case "102" : { map.put("a102", sbulist.getDocCount());   break;} 
+							case "103" : { map.put("a103", sbulist.getDocCount());   break;} 
+							case "104" : { map.put("a104", sbulist.getDocCount());   break;} 
+							case "105" : { map.put("a105", sbulist.getDocCount());   break;} 
+							case "106" : { map.put("a106", sbulist.getDocCount());   break;} 
+							case "107" : { map.put("a107", sbulist.getDocCount());   break;} 
+							case "108" : { map.put("a108", sbulist.getDocCount());   break;}
+							default : { map.put("aetc", sbulist.getDocCount());   break;} 
+						}						  						
+					}
+				}
+				
+				map.put("key", b.getKeyAsString());
+				graphList.add(map);
+			}	
+			
+			
+			// 유출 발생 추이 차트
+			Histogram graphKeyword = searchResponse.getAggregations().get("Keywordgraph");
+			ArrayList<HashMap<String, Object>> KeywordgraphList = new ArrayList<HashMap<String, Object>>();
+			for (Histogram.Bucket b : graphKeyword.getBuckets()) {
+				HashMap<String, Object> map = new HashMap<String, Object>();
+				
+				// 	실제 개인정보, 키워드문서를 오픈해서 각 그룹별로 작업을 해야 함
+				// 개인정보의 경우 묶어서 처리를 하지만 키워드는,,, 묶어서 처리가 가능할지 의문
+				Terms keywordCnt = b.getAggregations().get("keywordCnt");
+				long keywordTotCnt = 0;
+				for (Bucket keyword : keywordCnt.getBuckets()) {
+					if (!keyword.getKey().toString().equals("")) {
+						keywordTotCnt ++;	
+					}
+				}
+				
+//				for (Bucket keyword : keywordCnt.getBuckets()) {
+//					if (!keyword.getKey().toString().equals("")) {
+//						System.out.println( "keyword get key ");
+//						System.out.println( keyword.getKey().toString());
+//						System.out.println( keyword.getDocCount());
+//						
+//						String[] tempKey = keyword.getKey().toString().split(",");																
+//						
+//						for (String key : tempKey ){
+//							String keyCount = key.split(",")[2];	
+//							long docKeyCnt = Long.parseLong(keyCount) *  keyword.getDocCount();							
+//						}
+//					}					
+//				}
+				
+				
+				Terms peCnt = b.getAggregations().get("peCnt");
+				long peTotCnt = 0;
+				for (Bucket keyPe : peCnt.getBuckets()) {
+					if (!keyPe.getKey().toString().equals("")) {
+						peTotCnt ++;	
+					}
+				}				
+ 	
+				map.put("key", b.getKeyAsString());
+				map.put("keywordCnt", keywordTotCnt);
+				map.put("peCnt", peTotCnt);				
+				KeywordgraphList.add(map);
+			}				
+			
+			// 유출 사용자 Top 5 
+			Terms top5 = searchResponse.getAggregations().get("top5agent");
+			ArrayList<HashMap<String, Object>> topList = new ArrayList<HashMap<String, Object>>();
+			for(Bucket b : top5.getBuckets()) {
+				HashMap<String, Object> map = new HashMap<String, Object>();
+				
+				TopHits topHit = b.getAggregations().get("agentName");
+				for(SearchHit hit : topHit.getHits()) {
+					map.put("agentName", hit.getSourceAsMap().get("agentName"));
+					map.put("agentDeptName", hit.getSourceAsMap().get("agentDeptName"));
+				}				
+				
+				map.put("totalCnt", b.getDocCount());
+				topList.add(map);			
+			}				
+
+			
+			resultMap.put("outflowgraph", graphList);
+			resultMap.put("outflowusertopList", topList);		
+			resultMap.put("KeywordgraphList", KeywordgraphList);			
+				
+			
+		} catch (Exception e) {
+			logger.info(e.getMessage());
+		}	 
+		
+				
+		return resultMap;		
+		
+	}			
+			
+	
+}
+
+
+
+
+
+// ES 데이터 조회 		
+//String startTime = (String)param.get("startTime");
+//String endTime = (String)param.get("endTime");
+//String startHour = startTime.split(":")[0];
+//String startMin = startTime.split(":")[1];
+//String endHour = endTime.split(":")[0];
+//String endMin = endTime.split(":")[1];
+//
+//try {
+//	//db조회
+//	Map<String, Object> policyApply = agentMapper.getPolicyApplyAgentCount(customId);
+//	
+//	String script = "int time = Integer.parseInt(doc.logDate.value.toString('HHmm')); time >= "+startHour+startMin+" && time <= " + endHour+endMin;
+//	
+//	
+//	BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+//	boolQuery.must(QueryBuilders.termQuery("customerId", customId));
+//	boolQuery.must(QueryBuilders.termQuery("appName", AppName.REALTIME_FILE_LOG));
+////		boolQuery.must(QueryBuilders.termQuery("outflowType", 3));
+////		boolQuery.must(QueryBuilders.rangeQuery("logDate").gte("now-7d/d"));
+//	
+//	TermsAggregationBuilder top5Aggs = AggregationBuilders.terms("top5").field("agentId").order(BucketOrder.key(false)).size(5)
+//			.subAggregation(AggregationBuilders.topHits("agentName").size(1).fetchSource(new String[] {"agentName", "agentDeptName"}, null))
+//			.subAggregation(AggregationBuilders.filter("dwg", QueryBuilders.termQuery("ext", "dwg")))
+//			.subAggregation(AggregationBuilders.sum("pe").field("peCnt"))
+//			.subAggregation(AggregationBuilders.sum("keyword").field("keywordCnt"));
+//	
+//	FilterAggregationBuilder workAggs = AggregationBuilders.filter("work", QueryBuilders.scriptQuery(new Script(ScriptType.INLINE, "painless", script, Collections.emptyMap())));		
+//	
+//	DateHistogramAggregationBuilder graphAggs = AggregationBuilders.dateHistogram("graph").field("logDate").dateHistogramInterval(DateHistogramInterval.DAY).format("MM.dd")
+//			.subAggregation(AggregationBuilders.filter("dwg", QueryBuilders.termQuery("ext", "dwg")))
+//			.subAggregation(AggregationBuilders.sum("peCnt").field("peCnt"))
+//			.subAggregation(AggregationBuilders.filter("allow", QueryBuilders.termQuery("isBlock", "0")));
+//	
+//	
+//	RestHighLevelClient client = esConfig.getRestClient();
+//	SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder()
+//		.query(boolQuery).aggregation(top5Aggs).aggregation(workAggs).aggregation(graphAggs).size(0);
+//		
+//	
+//	SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+//	
+//	SearchResponse searchResponse = new SearchResponse();
+//	try {
+//		searchResponse = client.search(searchRequest);
+//	} catch(Exception e) {
+//		logger.info(e.getMessage());
+//	}
+//	
+//	long totalCnt = searchResponse.getHits().totalHits;
+//	
+//	Filter work = searchResponse.getAggregations().get("work");
+//	Terms top5 = searchResponse.getAggregations().get("top5");
+//	Histogram graph = searchResponse.getAggregations().get("graph");
+//	
+//	// TOP5 목록
+//	ArrayList<HashMap<String, Object>> topList = new ArrayList<HashMap<String, Object>>();
+//	for(Bucket b : top5.getBuckets()) {
+//		HashMap<String, Object> map = new HashMap<String, Object>();
+//		
+//		TopHits topHit = b.getAggregations().get("agentName");
+//		for(SearchHit hit : topHit.getHits()) {
+//			map.put("agentName", hit.getSourceAsMap().get("agentName"));
+//			map.put("agentDeptName", hit.getSourceAsMap().get("agentDeptName"));
+//		}
+//		
+//		Sum pe = b.getAggregations().get("pe");
+//		Filter dwg = b.getAggregations().get("dwg");
+//		Sum keyword = b.getAggregations().get("keyword");
+//		
+//		map.put("totalCnt", b.getDocCount());
+//		map.put("peCnt", pe.getValue());
+//		map.put("dwgCnt", dwg.getDocCount());
+//		map.put("keywordCnt", keyword.getValue());
+//		topList.add(map);
+//		
+//	}
+//	
+//	// 그래프 데이터
+//	ArrayList<HashMap<String, Object>> graphList = new ArrayList<HashMap<String, Object>>();
+//	for (Histogram.Bucket b : graph.getBuckets()) {
+//		HashMap<String, Object> map = new HashMap<String, Object>();
+//		
+//		Filter dwg = b.getAggregations().get("dwg");
+//		Sum pe = b.getAggregations().get("peCnt");
+//		Filter allow = b.getAggregations().get("allow");
+//
+//		map.put("key", b.getKeyAsString());
+//		map.put("dwg", dwg.getDocCount());
+//		map.put("pe", pe.getValue());
+//		map.put("allow", allow.getDocCount());
+//		graphList.add(map);
+//	}
+//	
+//	resultMap.put("policyApply", policyApply);
+//	resultMap.put("totalCnt", totalCnt);
+//	resultMap.put("workHourCnt", work.getDocCount());		
+//	resultMap.put("topList", topList);
+//	resultMap.put("graph", graphList);
+//	
+//} catch (Exception e) {
+//	logger.info(e.getMessage());
+//}
+//	
+//

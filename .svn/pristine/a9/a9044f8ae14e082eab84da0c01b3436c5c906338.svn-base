@@ -1,0 +1,21 @@
+package com.slamdh.apiserver.security;
+
+public class JwtAuthResponse{
+
+    private final String token;
+    private String customId;
+
+    public JwtAuthResponse(String token, String customId) {
+        this.token = token;
+        this.customId = customId;
+    }
+
+    public String getToken() {
+        return this.token;
+    }
+    
+    public String getCustomId() {
+        return this.customId;
+    }
+    
+}

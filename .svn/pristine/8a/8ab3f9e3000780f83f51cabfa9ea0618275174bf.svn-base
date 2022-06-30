@@ -1,0 +1,476 @@
+package com.slamdh.apiserver.service;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
+
+import org.elasticsearch.action.search.SearchRequest;
+import org.elasticsearch.action.search.SearchResponse;
+import org.elasticsearch.client.RestHighLevelClient;
+import org.elasticsearch.index.query.BoolQueryBuilder;
+import org.elasticsearch.index.query.QueryBuilders;
+import org.elasticsearch.search.SearchHit;
+import org.elasticsearch.search.aggregations.AggregationBuilders;
+import org.elasticsearch.search.aggregations.BucketOrder;
+import org.elasticsearch.search.aggregations.bucket.filter.Filter;
+import org.elasticsearch.search.aggregations.bucket.filter.FilterAggregationBuilder;
+import org.elasticsearch.search.aggregations.bucket.histogram.DateHistogramAggregationBuilder;
+import org.elasticsearch.search.aggregations.bucket.histogram.DateHistogramInterval;
+import org.elasticsearch.search.aggregations.bucket.histogram.ExtendedBounds;
+import org.elasticsearch.search.aggregations.bucket.histogram.Histogram;
+import org.elasticsearch.search.aggregations.bucket.range.DateRangeAggregationBuilder;
+import org.elasticsearch.search.aggregations.bucket.range.Range;
+import org.elasticsearch.search.aggregations.bucket.terms.Terms;
+import org.elasticsearch.search.aggregations.bucket.terms.Terms.Bucket;
+import org.elasticsearch.search.aggregations.bucket.terms.TermsAggregationBuilder;
+import org.elasticsearch.search.aggregations.metrics.tophits.TopHits;
+import org.elasticsearch.search.aggregations.metrics.valuecount.ValueCount;
+import org.elasticsearch.search.builder.SearchSourceBuilder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import com.slamdh.apiserver.ElasticsearchConfiguration;
+import com.slamdh.apiserver.mapper.BlackListMapper;
+
+@Service
+public class DashboardService extends CommonService{
+
+	static final Logger logger = LoggerFactory.getLogger(DashboardService.class);
+	
+	@Autowired
+	ElasticsearchConfiguration esConfig;
+	@Autowired
+	BlackListMapper blackListMapper;
+	
+	@Value("${spring.data.elasticsearch.index}")
+	String index;
+	@Value("${spring.data.elasticsearch.type}")
+	String type;
+	
+	
+	public Map<String, Object> getSummary(Map<String, Object> param) {
+		
+		Map<String, Object> map = new HashMap<String, Object>();
+		
+		String dateType = (String) param.get("dateType");
+		String from = "";
+		
+		if(dateType.equals("1")) {
+			from = "now-1d/d";
+		} else if(dateType.equals("2")) {
+			from = "now-6d/d";
+		} else {
+			from = "now-30d/d";
+		}
+		
+		DateRangeAggregationBuilder aggs = AggregationBuilders.dateRange("aggsCnt").field("@timestamp").addUnboundedFrom(from);
+		FilterAggregationBuilder outCntAggs = AggregationBuilders.filter("out_cnt", QueryBuilders.boolQuery().must(QueryBuilders.termsQuery("outflowType", "1","2","3")));
+		FilterAggregationBuilder anomalyCntAggs = AggregationBuilders.filter("anomaly_cnt", getAnomalyQuery());
+		
+		
+		aggs.subAggregation(outCntAggs);
+		aggs.subAggregation(AggregationBuilders.filter("black_cnt", getBlackListQuery()));
+		aggs.subAggregation(AggregationBuilders.terms("agentAgg").field("agentId")
+				.subAggregation(AggregationBuilders.terms("typeAgg").field("analysisType")
+						.subAggregation(AggregationBuilders.terms("dateAggs").field("@timestamp").order(BucketOrder.key(false)).size(1)
+						.subAggregation(AggregationBuilders.filter("dangerCnt", QueryBuilders.termQuery("dangerFlag", "1"))))));
+		
+		aggs.subAggregation(anomalyCntAggs);
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().aggregation(aggs).size(0);
+//		SearchRequest searchRequest = new SearchRequest(index+"dfas", index+"20190403").types(type).source(searchSourceBuilder);
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		SearchResponse searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		Filter outCnt = null;
+		Filter blackCnt = null;
+		Filter anomalyCnt = null;
+		int violationCnt = 0;
+		
+		Range resultAggs  = searchResponse.getAggregations().get("aggsCnt");
+		for (Range.Bucket entry : resultAggs.getBuckets()) {
+		    
+			outCnt = entry.getAggregations().get("out_cnt");
+			blackCnt = entry.getAggregations().get("black_cnt");
+			anomalyCnt = entry.getAggregations().get("anomaly_cnt");
+			
+			//보안정책위반, 보안진단10개 항목중 1개라도 위반한 에이전트의 수
+			Terms agentBuckets = entry.getAggregations().get("agentAgg");
+			for(Bucket agentBucket : agentBuckets.getBuckets()) {
+				int count = 0;
+				Terms typeBuckets = agentBucket.getAggregations().get("typeAgg");
+				for(Bucket typeBucket : typeBuckets.getBuckets()) {
+					Terms dateBuckets = typeBucket.getAggregations().get("dateAggs");
+					for(Bucket dateBucket : dateBuckets.getBuckets()) {
+						Filter dagnetCnt = dateBucket.getAggregations().get("dangerCnt");
+						count += dagnetCnt.getDocCount();
+					}
+				}
+				if(count > 0) {
+					violationCnt++;
+				}
+			};
+		}
+		
+		map.put("anomalyCnt", anomalyCnt.getDocCount());
+		map.put("outCnt", outCnt.getDocCount());
+		map.put("blackCnt", blackCnt.getDocCount());
+		map.put("violationCnt", violationCnt);
+		
+		return map;
+		
+	}
+	
+	
+	public Map<String, Object> getThreatsReview(Map<String, Object> param) {
+		
+		Map<String, Object> map = new HashMap<String, Object>();
+		
+		String dateType = (String) param.get("dateType");
+		String from = "";
+		
+		if(dateType.equals("1")) {
+			from = "now-1d/d";
+		} else if(dateType.equals("2")) {
+			from = "now-6d/d";
+		} else {
+			from = "now-30d/d";
+		}
+		
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.must(QueryBuilders.rangeQuery("@timestamp").gte(from));
+		
+		FilterAggregationBuilder anomalyAggs = AggregationBuilders.filter("anomaly_cnt", getAnomalyQuery());
+		anomalyAggs.subAggregation(AggregationBuilders.terms("anomaly_apps").field("processName.raw").order(BucketOrder.count(false)).size(5));
+		anomalyAggs.subAggregation(AggregationBuilders.terms("anomaly_agent").field("agentId").subAggregation(AggregationBuilders.topHits("agentName").size(1).fetchSource("agentName","")));
+		
+		TermsAggregationBuilder outflowAggs = AggregationBuilders.terms("outflow_cnt").field("outflowSubType").order(BucketOrder.count(false)).size(5);
+		outflowAggs.subAggregation(AggregationBuilders.terms("outflow_agent").field("agentId").subAggregation(AggregationBuilders.topHits("agentName").size(1).fetchSource("agentName","")));
+		
+		FilterAggregationBuilder blackListAggs = AggregationBuilders.filter("blacklist_cnt", getBlackListQuery());
+		blackListAggs.subAggregation(AggregationBuilders.count("black_website").field("hostUrl.raw"));
+		blackListAggs.subAggregation(AggregationBuilders.count("black_keyword").field("searchKeyword.raw"));
+		blackListAggs.subAggregation(AggregationBuilders.count("black_process").field("processName.raw"));
+		blackListAggs.subAggregation(AggregationBuilders.terms("black_agent").field("agentId").subAggregation(AggregationBuilders.topHits("agentName").size(1).fetchSource("agentName","")));
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery).aggregation(anomalyAggs).aggregation(outflowAggs).aggregation(blackListAggs).size(0);
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		
+		SearchResponse searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		ArrayList<Map<String, Object>> appList = new ArrayList<Map<String, Object>>();
+		ArrayList<Map<String, Object>> outflowList = new ArrayList<Map<String, Object>>();
+		ArrayList<Map<String, Object>> blackList = new ArrayList<Map<String, Object>>();
+		ArrayList<Map<String, Object>> agentList = new ArrayList<Map<String, Object>>();
+		Map<String, Object> agentMap = new HashMap<String, Object>();
+		Map<String, Object> agentNameMap = new HashMap<String, Object>();
+		
+		Filter anomalyCnt = searchResponse.getAggregations().get("anomaly_cnt");
+		Terms outflowCnt = searchResponse.getAggregations().get("outflow_cnt");
+		Filter blackCnt = searchResponse.getAggregations().get("blacklist_cnt");
+		
+		// 의심행위(Apps) Top5  데이터 추출
+		Terms anomalyApps = anomalyCnt.getAggregations().get("anomaly_apps");
+		
+		for(Bucket b : anomalyApps.getBuckets()) {
+			Map<String, Object> m = new HashMap<String, Object>();
+			m.put("processName", b.getKeyAsString());
+			m.put("count", b.getDocCount());
+			appList.add(m);
+		}
+		
+		// 정보유출 Top5
+		for(Bucket b : outflowCnt.getBuckets()) {
+			
+			//유출 타입이 없을경우(로컬이동) -1
+			if(!b.getKeyAsString().equals("-1")) {
+				Map<String, Object> m = new HashMap<String, Object>();
+				m.put("outflowType", b.getKeyAsString());
+				m.put("count", b.getDocCount());
+				outflowList.add(m);
+				
+				Terms outflowAgent = b.getAggregations().get("outflow_agent");
+				for(Bucket bucket : outflowAgent.getBuckets()) {
+					
+					long count = 0;
+					if(agentMap.containsKey(bucket.getKeyAsString())) {
+						count = (long)agentMap.get(bucket.getKeyAsString()) + bucket.getDocCount();
+					} else {
+						count = bucket.getDocCount();
+					}
+					agentMap.put(bucket.getKeyAsString(), count);
+					
+					TopHits topHit = bucket.getAggregations().get("agentName");
+					for(SearchHit hit : topHit.getHits()) {
+						agentNameMap.put(bucket.getKeyAsString(), hit.getSourceAsMap().get("agentName"));
+					}
+				}
+			}
+		}
+		
+		// 비업무 
+		ValueCount blackWebsite = blackCnt.getAggregations().get("black_website");
+		ValueCount blackKeyword = blackCnt.getAggregations().get("black_keyword");
+		ValueCount blackProcess = blackCnt.getAggregations().get("black_process");
+		
+		Map<String, Object> m1 = new HashMap<String, Object>();
+		Map<String, Object> m2 = new HashMap<String, Object>();
+		Map<String, Object> m3 = new HashMap<String, Object>();
+		m1.put("appName", "blackWebsite");
+		m1.put("count", blackWebsite.value());
+		m2.put("appName", "blackKeyword");
+		m2.put("count", blackKeyword.value());
+		m3.put("appName", "blackProcess");
+		m3.put("count", blackProcess.value());
+		blackList.add(m1);
+		blackList.add(m2);
+		blackList.add(m3);
+		
+		// 사용자 Top5 추출
+		Terms anomalyAgent = anomalyCnt.getAggregations().get("anomaly_agent");
+		for(Bucket b : anomalyAgent.getBuckets()) {
+			long count = 0;
+			if(agentMap.containsKey(b.getKeyAsString())) {
+				count = (long)agentMap.get(b.getKeyAsString()) + b.getDocCount();
+			} else {
+				count = b.getDocCount();
+			}
+			agentMap.put(b.getKeyAsString(), count);
+			
+			TopHits topHit = b.getAggregations().get("agentName");
+			for(SearchHit hit : topHit.getHits()) {
+				agentNameMap.put(b.getKeyAsString(), hit.getSourceAsMap().get("agentName"));
+			}
+			
+		}
+		
+		Terms blackAgent = blackCnt.getAggregations().get("black_agent");
+		for(Bucket b : blackAgent.getBuckets()) {
+			long count = 0;
+			if(agentMap.containsKey(b.getKeyAsString())) {
+				count = (long)agentMap.get(b.getKeyAsString()) + b.getDocCount();
+			} else {
+				count = b.getDocCount();
+			}
+			agentMap.put(b.getKeyAsString(), count);
+			
+			TopHits topHit = b.getAggregations().get("agentName");
+			for(SearchHit hit : topHit.getHits()) {
+				agentNameMap.put(b.getKeyAsString(), hit.getSourceAsMap().get("agentName"));
+			}
+		}
+		
+		
+		//에이전트 목록 중복항목 합한 후 리스트로 변환
+		Iterator<String> keys = agentMap.keySet().iterator();
+        while( keys.hasNext() ){
+            String key = keys.next();
+            Map<String, Object> m = new HashMap<String, Object>();
+            m.put("agentName", agentNameMap.get(key));
+            m.put("count", agentMap.get(key));
+            agentList.add(m);
+        }
+		
+		//비교 정렬 후 
+		Collections.sort(agentList, new Comparator<Map<String, Object>>() {
+	        public int compare(final Map<String, Object> map1, final Map<String, Object> map2) {
+	            return map1.get("count").toString().compareTo(map2.get("count").toString());
+	        }
+	    });
+		
+		// 내림차순 정렬
+		Collections.reverse(agentList);
+		
+		map.put("appList", appList);
+		map.put("outflowList", outflowList);
+		map.put("blackList", blackList);
+		map.put("agentList", agentList);
+		
+		return map;
+		
+	}
+	
+	
+	public ArrayList<Map<String, Object>> getThreatsChart(Map<String, Object> param) {
+		
+		ArrayList<Map<String, Object>> resultList = new ArrayList<Map<String, Object>>();
+		
+		String dateType = (String) param.get("dateType");
+		String from = "";
+		String format = "";
+		String to = "";
+		DateHistogramInterval interval;
+		ExtendedBounds extendedBounds;
+		
+		if(dateType.equals("1")) {
+			from = "now-1d/d";
+			to = "now/d-1h";
+			interval = DateHistogramInterval.HOUR;
+			format = "HH";
+			extendedBounds = new ExtendedBounds(from, to);
+		} else if(dateType.equals("2")) {
+			from = "now-6d/d";
+			to = "now/d";
+			interval = DateHistogramInterval.DAY;
+			format = "yyyy-MM-dd";
+			extendedBounds = new ExtendedBounds(from, to);
+		} else {
+			from = "now-30d/d";
+			to = "now/d";
+			interval = DateHistogramInterval.DAY;
+			format = "yyyy-MM-dd";
+			extendedBounds = new ExtendedBounds(from, to);
+		}
+		
+		
+		DateRangeAggregationBuilder dateRamgeAggs = AggregationBuilders.dateRange("chart_aggs").field("@timestamp").addUnboundedFrom(from);
+		DateHistogramAggregationBuilder dateHistogramAggs = AggregationBuilders.dateHistogram("y_axis").field("@timestamp")
+				.dateHistogramInterval(interval).format(format).extendedBounds(extendedBounds);
+				
+		
+		FilterAggregationBuilder outCntAggs = AggregationBuilders.filter("out_cnt", QueryBuilders.boolQuery().must(QueryBuilders.termsQuery("outflowType", "1","2","3")));
+		FilterAggregationBuilder anomalyCntAggs = AggregationBuilders.filter("anomaly_cnt", getAnomalyQuery());
+		
+		dateHistogramAggs.subAggregation(outCntAggs);
+		dateHistogramAggs.subAggregation(AggregationBuilders.filter("black_cnt", getBlackListQuery()));
+		dateHistogramAggs.subAggregation(AggregationBuilders.terms("agentAgg").field("agentId")
+				.subAggregation(AggregationBuilders.terms("typeAgg").field("analysisType")
+						.subAggregation(AggregationBuilders.terms("dateAggs").field("@timestamp").order(BucketOrder.key(false)).size(1)
+						.subAggregation(AggregationBuilders.filter("dangerCnt", QueryBuilders.termQuery("dangerFlag", "1"))))));
+		
+		
+		dateHistogramAggs.subAggregation(anomalyCntAggs);
+		
+		
+		dateRamgeAggs.subAggregation(dateHistogramAggs);
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().aggregation(dateRamgeAggs).size(0);
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		SearchResponse searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		Range resultAggs  = searchResponse.getAggregations().get("chart_aggs");
+		
+		resultAggs.getBuckets().forEach(bucket -> {
+			
+			Histogram yAxis = bucket.getAggregations().get("y_axis");
+			
+			yAxis.getBuckets().forEach(b -> {
+				
+				Map<String, Object> map = new HashMap<String, Object>();
+				
+				Filter outCnt = b.getAggregations().get("out_cnt");
+				Filter blackCnt = b.getAggregations().get("black_cnt");
+				Filter anomalyCnt = b.getAggregations().get("anomaly_cnt");
+				
+				int violationCnt = 0;
+				//보안정책위반, 보안진단10개 항목중 1개라도 위반한 에이전트의 수
+				Terms agentBuckets = b.getAggregations().get("agentAgg");
+				for(Bucket agentBucket : agentBuckets.getBuckets()) {
+					int count = 0;
+					Terms typeBuckets = agentBucket.getAggregations().get("typeAgg");
+					for(Bucket typeBucket : typeBuckets.getBuckets()) {
+						Terms dateBuckets = typeBucket.getAggregations().get("dateAggs");
+						for(Bucket dateBucket : dateBuckets.getBuckets()) {
+							Filter dagnetCnt = dateBucket.getAggregations().get("dangerCnt");
+							count += dagnetCnt.getDocCount();
+						}
+					}
+					if(count > 0) {
+						violationCnt++;
+					}
+				};
+				
+				map.put("yAxis", b.getKeyAsString());
+				map.put("outCnt", outCnt.getDocCount());
+				map.put("blackCnt", blackCnt.getDocCount());
+				map.put("violationCnt", violationCnt);
+				map.put("anomalyCnt", anomalyCnt.getDocCount());
+				
+				resultList.add(map);
+				
+			});
+			
+		});
+		
+		return resultList;
+	}
+	
+	public Map<String, Object> getRealtimeEventCount(Map<String, Object> param) {
+		
+		Map<String, Object> resultMap = new HashMap<String, Object>();
+		
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.should(getAnomalyQuery());
+        boolQuery.should(QueryBuilders.termsQuery("outflowType", "1","2","3"));
+        boolQuery.minimumShouldMatch(1);
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery);
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		
+		SearchResponse searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		resultMap.put("totalCnt", searchResponse.getHits().getTotalHits());
+		return resultMap;
+	}
+
+	public ArrayList<Map<String, Object>> getRealtimeEvent(Map<String, Object> param) {
+		
+		ArrayList<Map<String, Object>> resultList = new ArrayList<Map<String, Object>>();
+		
+		int page = Integer.parseInt((String)param.get("page"));
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+        boolQuery.should(getAnomalyQuery());
+        boolQuery.should(QueryBuilders.termsQuery("outflowType", "1","2","3"));
+        boolQuery.minimumShouldMatch(1);
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery).from(page * 10).size(10);
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		
+		SearchResponse searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		for(SearchHit hit : searchResponse.getHits()) {
+			resultList.add(hit.getSourceAsMap());
+		}
+
+		getFileCheckList(resultList);
+		
+		return resultList;
+	}
+	
+}

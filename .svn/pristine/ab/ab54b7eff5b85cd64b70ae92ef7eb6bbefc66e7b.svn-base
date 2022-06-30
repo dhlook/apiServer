@@ -1,0 +1,61 @@
+package com.slamdh.apiserver.service;
+
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import com.slamdh.apiserver.mapper.PolicyMapper;
+         
+
+@Service
+public class PolicyService extends AgentService {
+
+	@Autowired
+	PolicyMapper policyMapper;
+	
+//	정책 목록 조회  
+	public ArrayList<Map<String, Object>>  selectPolicylists(Map<String, Object> map) throws Exception {		
+		return policyMapper.getSelectPolicylists(map); 
+	}	
+	
+//	정책 생성
+	public int insertPolicy(Map<String, Object> map) throws Exception {  
+		return policyMapper.setInsertPolicylist(map);
+	}
+	
+//	정책 수정 
+	public int updatePolicy(Map<String, Object> map) throws Exception {	 
+		int result = policyMapper.setUpdatePolicylist(map);
+		if (result == 1) {
+			Map<String, Object> params = new HashMap<String, Object>();
+			params.put("customId", map.get("customId").toString());
+			params.put("policyId", map.get("policyId").toString());							
+			String AgentList = policyMapper.getPolicyApplyAgentList(params);
+			
+			// 에이전트 목록 추출 			
+			// 추출된 에이전트 목록이 존재할 경우 정책 재전송 로직 추가
+			if (!AgentList.equals("")) {
+	  		    params.clear();			
+				params.put("agentlist", AgentList);			
+			    params.put("policydata", map.get("policydata").toString());		
+			    params.put("customId", map.get("customId").toString());
+	  		   // 정책 적용은 common service에서 처리할 수 있도록 변경시켜 준다.
+			    result =AgentPolicyApply(params);
+			}	    	    		    	 
+		}
+				
+		return result ;   
+	}	  
+	
+// 	정책 삭제
+	public int deletePolicy(Map<String, Object> map) throws Exception {
+		return policyMapper.setDeletePolicylist(map);
+	}		
+	
+	
+	
+}

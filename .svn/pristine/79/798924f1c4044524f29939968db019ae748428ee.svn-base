@@ -1,0 +1,133 @@
+package com.slamdh.apiserver.controller;
+
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseBody;
+
+import com.slamdh.apiserver.service.PolicyService; 
+
+@Controller
+public class PolicyController {
+	static final Logger logger = LoggerFactory.getLogger(PolicyController.class);
+	
+	@Autowired
+	PolicyService policyService; 
+	
+	@RequestMapping({"/api/Polcy/selectList"})
+	@ResponseBody
+	ArrayList<Map<String, Object>>  getpolicylists(HttpServletRequest request, HttpServletResponse response) {
+		
+		String customId = request.getParameter("customId");
+		String viewType = request.getParameter("viewType");
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		ArrayList<Map<String, Object>>  resultMap = new ArrayList<Map<String, Object>> ();
+		
+		try {
+			params.put("customId", customId);
+			params.put("viewType", viewType);
+			
+			resultMap = policyService.selectPolicylists(params);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}			
+		return  resultMap;		
+	}	
+	
+	@RequestMapping({"/api/Polcy/insertPolicy"})
+	@ResponseBody
+	int  setInsertPolicy(HttpServletRequest request, HttpServletResponse response) {
+		
+		int result = 0; 
+ 
+		
+		Map<String, Object> params = new HashMap<String, Object>();				
+		
+		try { 		
+			String random_guid = "";
+			int     checkCreate  = 0;
+			
+			if (request.getParameter("policyId").equals("")) {
+				random_guid = "{" + UUID.randomUUID() + "}";	
+				checkCreate = 1;
+			}
+			else random_guid = request.getParameter("policyId"); 			
+			
+			params.put("customId", request.getParameter("customId"));
+			params.put("policyId", random_guid);			
+			params.put("DLPType", request.getParameter("DLPType"));
+			params.put("PolicyName", request.getParameter("PolicyName"));
+			params.put("isPCSecu", request.getParameter("isPCSecu"));
+			params.put("isAgentCollect", request.getParameter("isAgentCollect"));
+			params.put("isDocuCollect", request.getParameter("isDocuCollect"));
+			params.put("isMailCoolect", request.getParameter("isMailCoolect"));
+			params.put("isRealtime", request.getParameter("isRealtime"));
+			params.put("isMediaCon", request.getParameter("isMediaCon"));
+			params.put("isNetCon", request.getParameter("isNetCon"));
+			params.put("isPrintCon", request.getParameter("isPrintCon"));
+			params.put("isPCCon", request.getParameter("isPCCon"));
+			params.put("isWebBlock", request.getParameter("isWebBlock"));
+			params.put("isProcessBlock",request.getParameter("isProcessBlock"));
+			params.put("isFileBlock", request.getParameter("isFileBlock"));
+			params.put("isScreencaptureBlock",request.getParameter("isScreencaptureBlock"));
+			params.put("isShareFolderBock", request.getParameter("isShareFolderBock"));
+			params.put("isWatermark", request.getParameter("isWatermark"));
+			
+			params.put("isMobile", request.getParameter("isMobile"));
+			params.put("isBluetooth", request.getParameter("isBluetooth"));
+			params.put("isDirectport", request.getParameter("isDirectport"));
+			params.put("isSerialport", request.getParameter("isSerialport"));
+			params.put("isClipboard", request.getParameter("isClipboard"));
+			params.put("islan", request.getParameter("islan"));
+			params.put("ispassword", request.getParameter("ispassword"));
+			params.put("isscreensaver", request.getParameter("isscreensaver"));		
+			params.put("Version", request.getParameter("Version"));
+			
+			params.put("policydata", request.getParameter("policydata"));			
+			
+			if (checkCreate == 1) {
+				result = policyService.insertPolicy(params);				
+			} 	
+			else {			
+				result = policyService.updatePolicy(params);			  							
+			}				  						
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}			
+		return   result;		
+	}		
+	
+	
+	@RequestMapping({"/api/Polcy/deletePolicy"})
+	@ResponseBody
+	int  setDeletePolicy(HttpServletRequest request, HttpServletResponse response) {
+		
+		int result = 0; 
+ 
+		
+		Map<String, Object> params = new HashMap<String, Object>();				
+		
+		try { 		
+			 
+			params.put("customId", request.getParameter("customId"));
+			params.put("policyId",  request.getParameter("policyId"));									 
+		    result = policyService.deletePolicy(params);		
+ 		  						
+		} catch(Exception e) {
+			logger.info(e.getMessage());  
+		}			
+		return   result;		
+	}			
+}

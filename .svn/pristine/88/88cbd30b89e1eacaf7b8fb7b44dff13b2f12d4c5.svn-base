@@ -1,0 +1,33 @@
+package com.slamdh.apiserver.mapper;
+
+
+import java.util.ArrayList;
+import java.util.Map;
+ 
+
+public interface CustomMapper {
+	
+	public ArrayList<Map<String, Object>> getCommonCodes(Map<String, Object> map)throws Exception;	
+	
+	public ArrayList<Map<String, Object>> getGroupList(Map<String, Object> map)throws Exception;	
+	
+	
+	
+	
+	
+	
+	public ArrayList<Map<String, Object>>  SelectCustomAgentCount(Map<String, Object> map)throws Exception ;	
+	
+	public ArrayList<Map<String, Object>>  SelectCustomAdminLists(Map<String, Object> map)throws Exception ;
+	
+	public int  InsertCustomAdmin(Map<String, Object> map)throws Exception ;
+
+	public int  DeleteCustomAdmin(Map<String, Object> map)throws Exception ;	
+	
+	public ArrayList<Map<String, Object>>  SelectCustomDeptLists(Map<String, Object> map)throws Exception ;	
+	
+	public int  InsertCustomDept(Map<String, Object> map)throws Exception ;
+	
+	public int  DeleteCustomDept(Map<String, Object> map)throws Exception ;	
+	
+}

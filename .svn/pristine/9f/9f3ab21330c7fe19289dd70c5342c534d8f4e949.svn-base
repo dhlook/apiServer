@@ -1,0 +1,38 @@
+package com.slamdh.apiserver.mapper;
+
+import java.util.ArrayList;
+import java.util.Map;
+
+public interface PolicyMapper {
+	
+	public ArrayList<Map<String, Object>> getPolicyList(Map<String, Object> map)throws Exception ;
+	
+	public Map<String, Object> getPolicyDetail(Map<String, Object> map)throws Exception ;
+	
+	public Map<String, Object> insertAgentPolicyAppy(Map<String, Object> map)throws Exception ;
+	
+	public Map<String, Object> insertPolicy(Map<String, Object> map)throws Exception ;
+	
+	public Map<String, Object> deletePolicy(Map<String, Object> map)throws Exception ;
+	
+	public Map<String, Object> copyPolicy(Map<String, Object> map)throws Exception ;
+	
+	public ArrayList<Map<String, Object>> getApplyAgentList(Map<String, Object> map)throws Exception ;
+	
+	
+	
+	
+	
+	
+	
+	public ArrayList<Map<String, Object>>  getSelectPolicylists(Map<String, Object> map)throws Exception ;
+	
+	public int  setInsertPolicylist(Map<String, Object> map)throws Exception ;
+	
+	public int  setUpdatePolicylist(Map<String, Object> map)throws Exception ;
+	
+	public int  setDeletePolicylist(Map<String, Object> map)throws Exception ;	
+	
+	public String  getPolicyApplyAgentList(Map<String, Object> map)throws Exception ;
+		
+}

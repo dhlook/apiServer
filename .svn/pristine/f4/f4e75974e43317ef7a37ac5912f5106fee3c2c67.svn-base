@@ -1,0 +1,20 @@
+package com.slamdh.apiserver.service;
+
+import java.util.Map;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import com.slamdh.apiserver.mapper.ProfileMapper;
+
+@Service
+public class ProfileService {
+	
+	@Autowired
+	ProfileMapper profileMapper;
+	
+	public int insertProfile(Map<String, Object> map) throws Exception {
+		return profileMapper.insertProfile(map);
+	}
+
+}

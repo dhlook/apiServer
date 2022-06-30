@@ -1,0 +1,1291 @@
+package com.slamdh.apiserver.service;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.UUID;
+
+import org.elasticsearch.action.search.SearchRequest;
+import org.elasticsearch.action.search.SearchResponse;
+import org.elasticsearch.client.RestHighLevelClient;
+import org.elasticsearch.index.query.BoolQueryBuilder;
+import org.elasticsearch.index.query.Operator;
+import org.elasticsearch.index.query.QueryBuilders;
+import org.elasticsearch.search.SearchHit;
+import org.elasticsearch.search.aggregations.AggregationBuilders;
+import org.elasticsearch.search.aggregations.BucketOrder;
+import org.elasticsearch.search.aggregations.bucket.filter.Filter;
+import org.elasticsearch.search.aggregations.bucket.filter.FilterAggregationBuilder;
+import org.elasticsearch.search.aggregations.bucket.histogram.DateHistogramInterval;
+import org.elasticsearch.search.aggregations.bucket.histogram.Histogram;
+import org.elasticsearch.search.aggregations.bucket.terms.Terms;
+import org.elasticsearch.search.aggregations.bucket.terms.Terms.Bucket;
+import org.elasticsearch.search.aggregations.bucket.terms.TermsAggregationBuilder;
+import org.elasticsearch.search.aggregations.metrics.tophits.TopHits;
+import org.elasticsearch.search.builder.SearchSourceBuilder;
+import org.elasticsearch.search.sort.SortOrder;
+import org.json.simple.JSONArray;
+import org.json.simple.JSONObject;
+import org.json.simple.parser.JSONParser;
+import org.json.simple.parser.ParseException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Service;
+
+import com.slamdh.apiserver.AppName;
+import com.slamdh.apiserver.ElasticsearchConfiguration;
+
+@Service
+public class DetailService extends CommonService {
+
+	static final Logger logger = LoggerFactory.getLogger(DetailService.class);
+	
+	@Autowired
+	ElasticsearchConfiguration esConfig;
+	
+	@Value("${spring.data.elasticsearch.index}")
+	String index;
+	@Value("${spring.data.elasticsearch.type}")
+	String type;
+	
+	
+	public Map<String, Object> getAnomalyChart(Map<String, Object> param) {
+		
+		Map<String, Object> map = new HashMap<String, Object>();
+
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(getAnomalyQuery())
+				.aggregation(AggregationBuilders.filter("hideCnt", QueryBuilders.termsQuery("isHide", "1")))
+				.aggregation(AggregationBuilders.filter("codesignCnt", QueryBuilders.termsQuery("isCodesign", "0")))
+				.aggregation(AggregationBuilders.filter("matchCnt", QueryBuilders.termsQuery("isMatchName", "1")))
+				.aggregation(AggregationBuilders.filter("macroCnt", QueryBuilders.termsQuery("isMacro", "1")))
+				.aggregation(AggregationBuilders.filter("comNameCnt", QueryBuilders.termsQuery("companyName", "")))
+				.size(0);
+				
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		
+		SearchResponse searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		Filter hideCnt  = searchResponse.getAggregations().get("hideCnt");
+		Filter codesignCnt  = searchResponse.getAggregations().get("codesignCnt");
+		Filter matchCnt  = searchResponse.getAggregations().get("matchCnt");
+		Filter macroCnt  = searchResponse.getAggregations().get("macroCnt");
+		Filter comNameCnt  = searchResponse.getAggregations().get("comNameCnt");
+		
+		map.put("hideCnt", hideCnt.getDocCount());
+		map.put("codesignCnt", codesignCnt.getDocCount());
+		map.put("matchCnt", matchCnt.getDocCount());
+		map.put("macroCnt", macroCnt.getDocCount());
+		map.put("comNameCnt", comNameCnt.getDocCount());
+		
+		return map;
+		
+	}
+	
+	
+	public Map<String, Object> getAnomalyCount(Map<String, Object> param) {
+		
+		Map<String, Object> map = new HashMap<String, Object>();
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.must(getAnomalyQuery());
+		
+		if(param.get("type") != null) {
+			String type = (String)param.get("type");
+			if(type.equals("isMatchName") || type.equals("isHide") || type.equals("isMacro")) {
+				boolQuery.must(QueryBuilders.termQuery(type, 1));
+			} else if(type.equals("isCodesign")) {
+				boolQuery.must(QueryBuilders.termQuery(type, 0));
+			} else if(type.equals("companyName")) {
+				boolQuery.must(QueryBuilders.termQuery(type, ""));
+			}
+		}
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery).size(0);
+		
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		
+		SearchResponse searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		map.put("totalCnt", searchResponse.getHits().getTotalHits());
+		
+		return map;
+		
+	}
+
+	public ArrayList<Map<String, Object>> getAnomalyList(Map<String, Object> param) {
+		
+		ArrayList<Map<String, Object>> resultList = new ArrayList<Map<String, Object>>();
+		
+		int page = Integer.parseInt((String)param.get("page"));
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.must(getAnomalyQuery());
+		
+		if(param.get("type") != null) {
+			String type = (String)param.get("type");
+			if(type.equals("isMatchName") || type.equals("isHide") || type.equals("isMacro")) {
+				boolQuery.must(QueryBuilders.termQuery(type, 1));
+			} else if(type.equals("isCodesign")) {
+				boolQuery.must(QueryBuilders.termQuery(type, 0));
+			} else if(type.equals("companyName")) {
+				boolQuery.must(QueryBuilders.termQuery(type, ""));
+			}
+		}
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery).from(page * 10).size(10).sort("@timestamp", SortOrder.DESC);
+		
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		SearchResponse searchResponse = new SearchResponse();
+
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		for(SearchHit hit : searchResponse.getHits()) {
+			resultList.add(hit.getSourceAsMap());
+		}
+		
+		getFileCheckList(resultList);
+		
+		return resultList;
+		
+	}
+	
+	public ArrayList<Map<String, Object>> getViolationCount(Map<String, Object> param) {
+		
+		ArrayList<Map<String, Object>> resultList = new ArrayList<Map<String, Object>>();
+		
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.must(QueryBuilders.matchQuery("appName", AppName.PC_SECURE));
+		
+		TermsAggregationBuilder aggs = AggregationBuilders.terms("typeAgg").field("analysisType");
+		aggs.subAggregation(AggregationBuilders.terms("agentAgg").field("agentId")
+			.subAggregation(AggregationBuilders.terms("dateAggs").field("@timestamp").order(BucketOrder.key(false)).size(1)
+			.subAggregation(AggregationBuilders.filter("dangerCnt", QueryBuilders.termQuery("dangerFlag", "1")))));
+		
+
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery).aggregation(aggs).size(0);
+				
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		SearchResponse searchResponse = new SearchResponse();
+		
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		Terms typeBuckets = searchResponse.getAggregations().get("typeAgg");
+		
+		for(Bucket typeBucket : typeBuckets.getBuckets()) {
+			Map<String, Object> map = new HashMap<String, Object>();
+			int count = 0;
+			int agentCnt = 0;
+			Terms agentBuckets = typeBucket.getAggregations().get("agentAgg");
+			for(Bucket agentBucket : agentBuckets.getBuckets()) {
+				Terms dateBuckets = agentBucket.getAggregations().get("dateAggs");
+				for(Bucket dateBucket : dateBuckets.getBuckets()) {
+					Filter dagnetCnt = dateBucket.getAggregations().get("dangerCnt");
+					count += dagnetCnt.getDocCount();
+				}
+				agentCnt++;
+			}
+
+			if(count != 0) {
+				long percent = (count / agentCnt) * 100;
+				map.put("type", typeBucket.getKey());
+				map.put("count", count);
+				map.put("percent", percent);
+				resultList.add(map);
+			}
+		};
+		
+		return resultList;
+		
+	}
+	
+	@SuppressWarnings("unused")
+	public Map<String, Object> getViolationListCount(Map<String, Object> param) {
+		
+		Map<String, Object> map = new HashMap<String, Object>();
+
+		String analysisType = (String)param.get("type");
+		
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.must(QueryBuilders.termQuery("appName", AppName.PC_SECURE));
+		boolQuery.must(QueryBuilders.termQuery("analysisType", analysisType));
+		boolQuery.must(QueryBuilders.termQuery("dangerFlag", "1"));
+		
+		TermsAggregationBuilder aggs = AggregationBuilders.terms("agentAgg").field("agentId");
+		aggs.subAggregation(AggregationBuilders.topHits("topHits").sort("@timestamp", SortOrder.DESC).size(1));
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery).aggregation(aggs);
+		
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		SearchResponse searchResponse = new SearchResponse();
+		
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		int totalCnt = 0;
+		
+		Terms agentBuckets = searchResponse.getAggregations().get("agentAgg");
+		for(Bucket agentBucket : agentBuckets.getBuckets()) {
+			TopHits topHits = agentBucket.getAggregations().get("topHits");
+			for(SearchHit hit : topHits.getHits().getHits()) {
+				totalCnt++;
+			}
+		};
+		
+		map.put("totalCnt", totalCnt);
+		
+		return map;
+		
+	}
+	
+	
+	public ArrayList<Map<String, Object>> getViolationList(Map<String, Object> param) {
+		
+		ArrayList<Map<String, Object>> resultList = new ArrayList<Map<String, Object>>();
+		
+		int page = Integer.parseInt((String)param.get("page"));
+		String analysisType = (String)param.get("type");
+		
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.must(QueryBuilders.termQuery("appName", AppName.PC_SECURE));
+		boolQuery.must(QueryBuilders.termQuery("analysisType", analysisType));
+		boolQuery.must(QueryBuilders.termQuery("dangerFlag", "1"));
+		
+		TermsAggregationBuilder aggs = AggregationBuilders.terms("agentAgg").field("agentId");
+		aggs.subAggregation(AggregationBuilders.topHits("topHits").sort("@timestamp", SortOrder.DESC).size(1));
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery).aggregation(aggs);
+		
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		SearchResponse searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+
+		Terms agentBuckets = searchResponse.getAggregations().get("agentAgg");
+		for(Bucket agentBucket : agentBuckets.getBuckets()) {
+			TopHits topHits = agentBucket.getAggregations().get("topHits");
+			for(SearchHit hit : topHits.getHits().getHits()) {
+				Map<String,Object> map = new HashMap<String,Object>();
+				map = hit.getSourceAsMap();
+				
+				String analysisDESC = (String)map.get("analysisDESC");
+				JSONParser jsonParser = new JSONParser();
+				JSONObject jObj = new JSONObject();
+				try {
+					jObj = (JSONObject) jsonParser.parse(analysisDESC);
+				} catch (ParseException e) {
+					// TODO Auto-generated catch block
+					logger.info("JSON Parsing Exception : " + e.getMessage()); 
+				}
+				
+				switch (analysisType) {
+					case "1" :
+						// 바이러스 백신 실행 및 최신패턴 업데이트
+						// 결과값  - 0:미설치 , 1:최신패턴업데이트 미적용, 2:백신서비스 미실행, 3:최신패턴업데이트 미적용 && 백신서비스 미실행
+						JSONArray jsonArr1 = (JSONArray) jObj.get("ANTIVIRUSPRODUCTINFO");
+						boolean isUpdate = false;
+						boolean isEnable = false;
+						
+						// 설치된 다수의 백신중 하나라도 업데이트나 서비스실행이 되어 있으면 전체를 양호로 보기 때문에  전부 해당이 안될 경우만 취약 
+						for(int i = 0; i < jsonArr1.size(); i++) {
+							JSONObject obj = (JSONObject) jsonArr1.get(i);
+							if(obj.get("ISUPTODATE").toString().equals("1")) {
+								isUpdate = true;
+							}
+							if(obj.get("ISENABLE").toString().equals("1")) {
+								isEnable = true;
+							}
+						}
+						
+						if(jsonArr1.size() == 0) {
+							map.put("desc", 0);
+						}
+						if(isUpdate == false) {
+							map.put("desc", 1);
+						}
+						if(isEnable == false) {
+							map.put("desc", 2);
+						}
+						if(isUpdate == false && isEnable == false) {
+							map.put("desc", 3);
+						}
+						break;
+						
+					case "2" :
+						// Windows 계정 패스워드 보안 설정
+						// 결과값  - 1:180일초과, 2:해독가능, 4:복잡성미설정, 8:암호길이8자미만, 16:만료기간미설정 , 중복의 경우 값의 합산으로 리턴
+						JSONArray jsonArr2 = (JSONArray) jObj.get("PASSWORDVERIFYINFO");
+						
+						//배열이지만 한건만 존재
+						for(int i = 0; i < jsonArr2.size(); i++) {
+							JSONObject obj = (JSONObject) jsonArr2.get(i);
+							
+							int sum = 0;
+
+							// 암호사용기간 180일 초과
+							int max = Integer.parseInt(obj.get("MAXIMUMPASSWORDAGE").toString());
+							if(max > 180 ) {
+								sum += 1;
+							}
+							// 해독가능한 암호를 사용하여 암호저장
+							if(obj.get("CLEARTEXTPASSWORD").toString().equals("1")) {
+								sum += 2;
+							}
+							// 암호복잡성 미설정
+							if(obj.get("PASSWORDCOMPLEXITY").toString().equals("0")) {
+								sum += 4;						
+							}
+							// 암호길이 8자 미만
+							if(obj.get("MINIMUMPASSWORDLEN").toString().equals("0")) {
+								sum += 8;
+							}
+							// 암호만료기간 미설정
+							if(obj.get("PASSWORDEXPIRES").toString().equals("0")) {
+								sum += 16;
+							}
+							map.put("desc", sum);
+						}
+						break;
+						
+					case "3" : 
+						// USB 자동 실행 설정
+						// 결과값  - 0:미설정, 1:설정
+						JSONArray jsonArr3 = (JSONArray) jObj.get("USBAUTOINFO");
+						
+						//배열이지만 한건만 존재
+						for(int i = 0; i < jsonArr3.size(); i++) {
+							JSONObject obj = (JSONObject) jsonArr3.get(i);
+							map.put("desc", obj.get("AUTORUNUSE").toString());
+						}
+						break;
+						
+					case "4" : 
+						// windows, MS Office의 최신 보안패치
+						// 결과값  - 업데이트미적용 건수
+						JSONArray jsonArr4 = (JSONArray) jObj.get("SECURITYUPDATEINFO");
+						map.put("desc", jsonArr4.size());
+						break;
+						
+					case "5" : 
+						// windows 로그인 패스워드 6개월 초과사용 여부
+						// 결과값  - 마지막변경일로부터 경과일
+						JSONArray jsonArr5 = (JSONArray) jObj.get("PASSWORDCHANGEINFO");
+						//배열이지만 한건만 존재
+						for(int i = 0; i < jsonArr5.size(); i++) {
+							JSONObject obj = (JSONObject) jsonArr5.get(i);
+							int betweenDays = Integer.parseInt(obj.get("BETWEENDAYS").toString());
+							if(betweenDays > 180) {
+								map.put("desc", betweenDays);
+							}
+						}
+						break;
+						
+					case "6" : 
+						// 원격데스크탑 사용
+						// 결과값  - 0:미사용, 1:사용
+						JSONArray jsonArr6 = (JSONArray) jObj.get("REMOTEACCESSINFO");
+						//배열이지만 한건만 존재
+						for(int i = 0; i < jsonArr6.size(); i++) {
+							JSONObject obj = (JSONObject) jsonArr6.get(i);
+							map.put("desc", obj.get("USE").toString());
+						}
+						break;
+						
+					case "7" : 
+						// Windows 방화벽 사용
+						// 결과값  - 0:미사용, 1:사용
+						JSONArray jsonArr7 = (JSONArray) jObj.get("FIREWALLINFO");
+						//배열이지만 한건만 존재
+						for(int i = 0; i < jsonArr7.size(); i++) {
+							JSONObject obj = (JSONObject) jsonArr7.get(i);
+							if(obj.get("PUBLICENABLE").toString().equals("0") || obj.get("STANDARDENABLE").toString().equals("0")) {
+								map.put("desc", 0);
+							} else {
+								map.put("desc", 1);
+							}
+						}
+						break;
+						
+					case "8" : 
+						// 사용자 공유폴더 설정
+						// 결과값  - 공유폴더 건수
+						JSONArray jsonArr8 = (JSONArray) jObj.get("SHAREFOLDERINFO");
+						map.put("desc", jsonArr8.size());
+						break;
+						
+					case "9" : 
+						// 무선랜카드 설치 및 사용설정
+						// 결과값  - 무선랜카드명
+						JSONArray jsonArr9 = (JSONArray) jObj.get("WIRELESSLANINFO");
+						for(int i = 0; i < jsonArr9.size(); i++) {
+							JSONObject obj = (JSONObject) jsonArr9.get(i);
+							map.put("desc", obj.get("DESC").toString());
+						}
+						break;
+						
+					case "10" : 
+						// 미사용 ActiveX 설치
+						// 결과값  - ActiveX 설치 건수
+						JSONArray jsonArr10 = (JSONArray) jObj.get("ACTIVEXINFO");
+						map.put("desc", jsonArr10.size());
+						break;
+					default : 
+						break;
+						
+				}
+				map.put("analysisType", analysisType);
+				map.put("_id", hit.getId());
+				resultList.add(map);
+			}
+		};
+		
+		Collections.sort(resultList, new Comparator<Map<String, Object>>() {
+	        public int compare(final Map<String, Object> map1, final Map<String, Object> map2) {
+	            return map1.get("_id").toString().compareTo(map2.get("_id").toString());
+	        }
+	    });
+		
+		/*Aggs에서 페이징이 안되기때문에 여기서 페이징 처리*/
+		int start, end = 0;
+		
+		if(page == 0) {
+			start = 0;
+			end = 10;
+		} else {
+			start = page * 10;
+			end = (page + 1) * 10;
+		}
+		
+		if(end > resultList.size()) {
+			end = resultList.size();
+		}
+		
+		return new ArrayList<Map<String,Object>>(resultList.subList(start, end));
+	}
+
+	public Map<String, Object> getOutflowChart(Map<String, Object> param) {
+		
+		Map<String, Object> map = new HashMap<String, Object>();
+		
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.should(QueryBuilders.termQuery("isHide", 1));
+		boolQuery.should(QueryBuilders.termQuery("isCodesign", 0));
+		boolQuery.should(QueryBuilders.termQuery("isMatchName", 1));
+		boolQuery.should(QueryBuilders.termQuery("isMacro", 1));
+		boolQuery.should(QueryBuilders.termQuery("companyName", ""));
+		boolQuery.minimumShouldMatch(1);
+
+		
+		FilterAggregationBuilder aggs = AggregationBuilders.filter("outflowCnt", QueryBuilders.termsQuery("outflowType", "1","2","3"))
+		.subAggregation(AggregationBuilders.filter("anomalyCnt", boolQuery));
+		
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().aggregation(aggs);
+				
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		SearchResponse searchResponse = new SearchResponse();
+		
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		Filter outflwCnt  = searchResponse.getAggregations().get("outflowCnt");
+		Filter anomalyCnt = outflwCnt.getAggregations().get("anomalyCnt");
+		
+		map.put("uOutflowCnt", outflwCnt.getDocCount() - anomalyCnt.getDocCount());
+		map.put("pOutflowCnt", anomalyCnt.getDocCount());
+		
+		return map;
+		
+	}
+	
+	public Map<String, Object> getOutflowCount(Map<String, Object> param) {
+		
+		Map<String, Object> map = new HashMap<String, Object>();
+
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.must(QueryBuilders.termsQuery("outflowType", "1","2","3"));
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery).size(0);
+		
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		
+		SearchResponse searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		map.put("totalCnt", searchResponse.getHits().getTotalHits());
+		
+		return map;
+		
+	}
+	
+	
+	public ArrayList<Map<String, Object>> getOutflowList(Map<String, Object> param) {
+		
+		ArrayList<Map<String, Object>> resultList = new ArrayList<Map<String, Object>>();
+		
+		int page = Integer.parseInt((String)param.get("page"));
+		
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.must(QueryBuilders.termsQuery("outflowType", "1","2","3"));
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery).from(page * 10).size(10);
+		
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		
+		SearchResponse searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		for(SearchHit hit : searchResponse.getHits()) {
+			resultList.add(hit.getSourceAsMap());
+		}
+		
+		getFileCheckList(resultList);
+		
+		return resultList;
+		
+	}
+	
+	
+	@SuppressWarnings("unchecked")
+	public Map<String, Object> getFileEventAssociation(Map<String, Object> param) {
+		
+		String md5 = (String)param.get("md5");
+		String agentId = (String)param.get("agentId");
+		String fileName = (String)param.get("fileName");
+		String filePath = (String)param.get("filePath");
+		Map<String, Object> map = new HashMap<String, Object>();
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.must(QueryBuilders.termQuery("md5", md5));
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery).size(0)
+				//md5 기준으로 동일 사용자 추출
+				.aggregation(AggregationBuilders.terms("agents").field("agentId")
+						.subAggregation(AggregationBuilders.topHits("agentName").size(1).fetchSource(new String [] {"agentName","agentDeptName"}, null))
+						.subAggregation(AggregationBuilders.filter("outflow", QueryBuilders.termsQuery("outflowType", "1", "2", "3")).
+								subAggregation(AggregationBuilders.terms("outflowType").field("outflowType")
+										.subAggregation(AggregationBuilders.topHits("topHit")))))
+										
+				//리스트에서 선택한 사용자를 기준으로 나머지 항목 추출
+				.aggregation(AggregationBuilders.filter("agentData", QueryBuilders.termQuery("agentId", agentId))
+						.subAggregation(AggregationBuilders.terms("url").field("domainName.raw").subAggregation(AggregationBuilders.terms("browser").field("browserType")))
+						.subAggregation(AggregationBuilders.filter("dupFile", QueryBuilders.termsQuery("appName", AppName.REALTIME_FILE_LOG, AppName.FILE)).subAggregation(AggregationBuilders.terms("filePath").field("filePath.raw")))
+						.subAggregation(AggregationBuilders.filter("downPath", QueryBuilders.termQuery("appName", AppName.BROWSER_DOWNLOAD))
+								.subAggregation(AggregationBuilders.topHits("top").size(1).sort("@timestamp", SortOrder.DESC))));
+		
+		
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		SearchResponse searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		//최근열어본 문서의 관련 프로그램
+		BoolQueryBuilder boolQuery2 = QueryBuilders.boolQuery();
+		boolQuery2.must(QueryBuilders.termQuery("agentId", agentId));
+		boolQuery2.must(QueryBuilders.termQuery("appName", AppName.REALTIME_FILE_LOG));
+		boolQuery2.must(QueryBuilders.queryStringQuery(getNgramQuery(fileName)).field("fileName").defaultOperator(Operator.AND));
+		boolQuery2.must(QueryBuilders.matchQuery("filePath", filePath.toLowerCase()).operator(Operator.AND));
+		
+		SearchSourceBuilder searchSourceBuilder2 = new SearchSourceBuilder().query(boolQuery2).size(0)
+				.aggregation(AggregationBuilders.terms("program").field("processName.raw"));
+		
+		SearchRequest searchRequest2 = new SearchRequest(index + "*").types(type).source(searchSourceBuilder2);
+		SearchResponse searchResponse2 = new SearchResponse();
+		try {
+			searchResponse2 = client.search(searchRequest2);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		
+		Terms agents = searchResponse.getAggregations().get("agents");
+		Filter agentData = searchResponse.getAggregations().get("agentData");
+		Terms url = agentData.getAggregations().get("url");
+		Filter dupFile = agentData.getAggregations().get("dupFile");
+		Terms dupFilePath = dupFile.getAggregations().get("filePath");
+		Filter downPath = agentData.getAggregations().get("downPath");
+		TopHits downPathTop = downPath.getAggregations().get("top");
+		Terms program = searchResponse2.getAggregations().get("program");
+		
+		ArrayList<Map<String, Object>> nodeList = new ArrayList<Map<String, Object>>();
+		ArrayList<Map<String, Object>> edgeList = new ArrayList<Map<String, Object>>();
+		
+		// Node 생성
+		Map<String, Object> pMap = new HashMap<String, Object>();
+		pMap.put("id", "1");
+		pMap.put("name", fileName);
+		pMap.put("label", "root");
+		pMap.put("isFile", true);
+		nodeList.add(pMap);
+		
+		for(Bucket b : agents.getBuckets()) {
+			Map<String, Object> m = new HashMap<String, Object>();
+			TopHits topHit = b.getAggregations().get("agentName");
+			for(SearchHit hit : topHit.getHits()) {
+				m.put("name", hit.getSourceAsMap().get("agentName"));
+				m.put("agentDeptName", hit.getSourceAsMap().get("agentDeptName"));
+			}
+			m.put("id", UUID.randomUUID());
+			m.put("agentId", b.getKeyAsString());
+			m.put("label", "agent");
+			
+			//에이전트별 유출타입
+			Filter outflow = b.getAggregations().get("outflow");
+			Terms outflowType = outflow.getAggregations().get("outflowType");
+			ArrayList<String> outflowList = new ArrayList<String>();
+			for(Bucket outBucket : outflowType.getBuckets()) {
+				
+				TopHits outflowDetail = outBucket.getAggregations().get("topHit");
+				for(SearchHit hit : outflowDetail.getHits()) {
+					
+					String outflowDetailType = null;
+					
+					if(outBucket.getKeyAsString().equals("2")) {
+						outflowDetailType = (String)hit.getSourceAsMap().get("processName");
+					} else {
+						outflowDetailType = (String)hit.getSourceAsMap().get("destDeviceId");
+					}
+					
+					Map<String, Object> subMap = new HashMap<String, Object>();
+					String subKey = UUID.randomUUID().toString();
+					subMap.put("id", subKey);
+					subMap.put("name", outflowDetailType);
+					subMap.put("type", outBucket.getKeyAsString());
+					subMap.put("label", "outflow");
+					nodeList.add(subMap);
+					outflowList.add(subKey);
+				}
+			}
+			
+			m.put("outflow", outflowList);
+			nodeList.add(m);
+		}
+		
+		for(Bucket b : url.getBuckets()) {
+			Map<String, Object> m = new HashMap<String, Object>();
+			m.put("id", UUID.randomUUID());
+			m.put("name", b.getKeyAsString());
+			m.put("label", "url");
+			
+			//url별 실행 브라우저
+			Terms browser = b.getAggregations().get("browser");
+			ArrayList<String> browserList = new ArrayList<String>();
+			
+			
+			for(Bucket browserBucket : browser.getBuckets()) {
+				Map<String, Object> subMap = new HashMap<String, Object>();
+				String subKey = UUID.randomUUID().toString();
+				subMap.put("id", subKey);
+				subMap.put("name", browserBucket.getKeyAsString());
+				subMap.put("label", "browser");
+				nodeList.add(subMap);
+				browserList.add(subKey);
+			}
+			m.put("browser", browserList);
+			nodeList.add(m);
+		}
+		
+		
+		for(Bucket b : dupFilePath.getBuckets()) {
+			Map<String, Object> m = new HashMap<String, Object>();
+			m.put("id", UUID.randomUUID());
+			m.put("name", b.getKeyAsString());
+			m.put("label", "filePath");
+			nodeList.add(m);
+		}
+		
+		for(SearchHit hit : downPathTop.getHits()) {
+			Map<String, Object> m = new HashMap<String, Object>();
+			m.put("id", UUID.randomUUID());
+			m.put("name", hit.getSourceAsMap().get("filePath"));
+			m.put("label", "downPath");
+			nodeList.add(m);
+			
+		}
+		
+		for(Bucket b : program.getBuckets()) {
+			Map<String, Object> m = new HashMap<String, Object>();
+			m.put("id", UUID.randomUUID());
+			m.put("name", b.getKeyAsString());
+			m.put("label", "program");
+			nodeList.add(m);
+		}
+		
+		
+		
+		// Edge 생성
+		for(Map<String, Object> m : nodeList) {
+			Map<String, Object> edgeMap = new HashMap<String, Object>();
+			edgeMap.put("id", UUID.randomUUID());
+			
+			if(m.get("label").toString().equals("agent")) {
+				edgeMap.put("source", m.get("id"));
+				edgeMap.put("target", "1");
+				edgeMap.put("type", "POSSESS");
+				
+				ArrayList<String> outflow = (ArrayList<String>) m.get("outflow");
+				for(String outflowKey : outflow) {
+					Map<String, Object> edgeSubMap = new HashMap<String, Object>();
+					edgeSubMap.put("id", UUID.randomUUID());
+					edgeSubMap.put("source", outflowKey);
+					edgeSubMap.put("target", m.get("id"));
+					edgeSubMap.put("type", "OUTFLOW");
+					edgeList.add(edgeSubMap);
+				}
+				
+			} else if(m.get("label").toString().equals("url")) {
+				edgeMap.put("source", "1");
+				edgeMap.put("target", m.get("id"));
+				edgeMap.put("type", "ACCESS");
+
+				ArrayList<String> browser = (ArrayList<String>) m.get("browser");
+				for(String browserKey : browser) {
+					Map<String, Object> edgeSubMap = new HashMap<String, Object>();
+					edgeSubMap.put("id", UUID.randomUUID());
+					edgeSubMap.put("source", browserKey);
+					edgeSubMap.put("target", m.get("id"));
+					edgeSubMap.put("type", "BROWSER");
+					edgeList.add(edgeSubMap);
+				}
+				
+			} else if(m.get("label").toString().equals("filePath")) {
+				edgeMap.put("source", "1");
+				edgeMap.put("target", m.get("id"));
+				edgeMap.put("type", "FILEPATH");
+				
+			} else if(m.get("label").toString().equals("downPath")) {
+				edgeMap.put("source", "1");
+				edgeMap.put("target", m.get("id"));
+				edgeMap.put("type", "DOWNPATH");
+				
+			} else if(m.get("label").toString().equals("program")) {
+				edgeMap.put("source", "1");
+				edgeMap.put("target", m.get("id"));
+				edgeMap.put("type", "PROGRAM");
+			} 
+				
+			edgeList.add(edgeMap);
+		}
+		
+		map.put("node", nodeList);
+		map.put("edge", edgeList);
+		
+		return map;
+	}
+	
+	
+	
+	@SuppressWarnings("unchecked")
+	public Map<String, Object> getProcessEventAssociation(Map<String, Object> param) {
+		
+		String md5 = (String)param.get("md5");
+		String agentId = (String)param.get("agentId");
+		String fileName = (String)param.get("fileName");
+		String filePath = (String)param.get("filePath");
+		String pid = (String)param.get("pid");
+		String appName = (String)param.get("appName");
+		
+		Map<String, Object> map = new HashMap<String, Object>();
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.must(QueryBuilders.termQuery("md5", md5));
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery).size(0)
+				//md5 기준으로 동일 사용자 추출
+				.aggregation(AggregationBuilders.terms("agents").field("agentId")
+						.subAggregation(AggregationBuilders.topHits("agentName").size(1).fetchSource(new String [] {"agentName","agentDeptName"}, null))
+						.subAggregation(AggregationBuilders.filter("outflow", QueryBuilders.termsQuery("outflowType", "1", "2", "3")).
+								subAggregation(AggregationBuilders.terms("outflowType").field("outflowType")
+										.subAggregation(AggregationBuilders.topHits("topHit")))))
+				//리스트에서 선택한 사용자를 기준으로 나머지 항목 추출
+				.aggregation(AggregationBuilders.filter("agentData", QueryBuilders.termQuery("agentId", agentId))
+						.subAggregation(AggregationBuilders.filter("downPath", QueryBuilders.termQuery("appName", AppName.BROWSER_DOWNLOAD))
+								.subAggregation(AggregationBuilders.topHits("top").size(1).sort("@timestamp", SortOrder.DESC)))
+						.subAggregation(AggregationBuilders.terms("processPath").field("srcPath"))
+						.subAggregation(AggregationBuilders.terms("url").field("domainName.raw").subAggregation(AggregationBuilders.terms("browser").field("browserType")))		
+						.subAggregation(AggregationBuilders.terms("parentProcess").field("parentProcessName")));
+								
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		SearchResponse searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		Terms agents = searchResponse.getAggregations().get("agents");
+		Filter agentData = searchResponse.getAggregations().get("agentData");
+		Terms url = agentData.getAggregations().get("url");
+		Filter downPath = agentData.getAggregations().get("downPath");
+		TopHits downPathTop = downPath.getAggregations().get("top");
+		Terms processPath = agentData.getAggregations().get("processPath");
+		Terms parentProcess = agentData.getAggregations().get("parentProcess");
+		
+		
+		// 접근파일 - 리얼타임로그에서 프로세스명이 같은거
+		// 활성네트워크 - 활성네트워크정보에서  pid가 같은거
+		// 자동실행 - 오토런 파일명 파일경로, 프로세스명프로세스경로
+		// 설치된 서비스명 - 라이브서비스 인포 에서 프로세스명+바이너리패스  = 프로세스명+프로세스패스
+		// 활성DLL - 활성DLL에서 pid가 같은거
+		
+		//최근열어본 문서의 관련 프로그램
+		boolQuery = QueryBuilders.boolQuery();
+		boolQuery.must(QueryBuilders.termQuery("agentId", agentId));
+		
+		BoolQueryBuilder accessFileQuery = QueryBuilders.boolQuery();
+		accessFileQuery.must(QueryBuilders.termQuery("appName", AppName.REALTIME_FILE_LOG));
+		accessFileQuery.must(QueryBuilders.queryStringQuery(getNgramQuery(fileName)).field("processName").defaultOperator(Operator.AND));
+		
+		BoolQueryBuilder liveNetworkQuery = QueryBuilders.boolQuery();
+		liveNetworkQuery.must(QueryBuilders.termQuery("appName", AppName.LIVE_NETWORK_STATUS));
+		liveNetworkQuery.must(QueryBuilders.termQuery("processId", pid));
+		
+		BoolQueryBuilder autorunQuery = QueryBuilders.boolQuery();
+		autorunQuery.must(QueryBuilders.termQuery("appName", AppName.AUTORUN));
+		autorunQuery.must(QueryBuilders.queryStringQuery(getNgramQuery(fileName)).field("fileName").defaultOperator(Operator.AND));
+		autorunQuery.must(QueryBuilders.matchQuery("filePath", filePath).operator(Operator.AND));
+		
+		BoolQueryBuilder liveProcessQuery = QueryBuilders.boolQuery();
+		liveProcessQuery.must(QueryBuilders.termQuery("appName", AppName.LIVE_PROCESS));
+		liveProcessQuery.must(QueryBuilders.queryStringQuery(getNgramQuery(fileName)).field("processName").defaultOperator(Operator.AND));
+		liveProcessQuery.must(QueryBuilders.matchQuery("binaryPath", filePath).operator(Operator.AND));
+		
+		BoolQueryBuilder livePropcessSubQuery = QueryBuilders.boolQuery();
+		BoolQueryBuilder livePropcessSubShouldQuery = QueryBuilders.boolQuery();
+		livePropcessSubShouldQuery.should(QueryBuilders.termsQuery("isCodesign", "0"));
+		livePropcessSubShouldQuery.should(QueryBuilders.termsQuery("companyName", ""));
+		livePropcessSubShouldQuery.minimumShouldMatch(1);
+		livePropcessSubQuery.must(QueryBuilders.termQuery("appName", AppName.LIVE_PROCESS_SUB));
+		livePropcessSubQuery.must(QueryBuilders.termQuery("pid", pid));
+		livePropcessSubQuery.must(livePropcessSubShouldQuery);
+		
+		searchSourceBuilder = new SearchSourceBuilder().query(boolQuery).size(0)
+				.aggregation(AggregationBuilders.filter("realTimeLog", accessFileQuery)
+						.subAggregation(AggregationBuilders.terms("accFilePath").field("fileName.raw")))
+				.aggregation(AggregationBuilders.filter("liveNetwork", liveNetworkQuery)
+						.subAggregation(AggregationBuilders.terms("ip").field("remoteIp")
+								.subAggregation(AggregationBuilders.terms("port").field("remotePort"))))
+				.aggregation(AggregationBuilders.filter("autorun", autorunQuery)
+						.subAggregation(AggregationBuilders.terms("srcPath").field("srcPath")))
+				.aggregation(AggregationBuilders.filter("liveProcess", liveProcessQuery)
+						.subAggregation(AggregationBuilders.terms("serviceName").field("serviceName.raw")))
+				.aggregation(AggregationBuilders.filter("liveProcessSub", livePropcessSubQuery)
+						.subAggregation(AggregationBuilders.terms("dllName").field("fileName.raw").size(1000)));
+		
+		
+		searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		Filter realTimeLog = searchResponse.getAggregations().get("realTimeLog");
+		Terms accFilePath = realTimeLog.getAggregations().get("accFilePath");
+		Filter liveNetwork = searchResponse.getAggregations().get("liveNetwork");
+		Terms remoteIp = liveNetwork.getAggregations().get("ip");
+		Filter autorun = searchResponse.getAggregations().get("autorun");
+		Terms srcPath = autorun.getAggregations().get("srcPath");
+		Filter liveProcess = searchResponse.getAggregations().get("liveProcess");
+		Terms serviceName = liveProcess.getAggregations().get("serviceName");
+		Filter liveProcessSub = searchResponse.getAggregations().get("liveProcessSub");
+		Terms dllName = liveProcessSub.getAggregations().get("dllName");
+		
+		ArrayList<Map<String, Object>> nodeList = new ArrayList<Map<String, Object>>();
+		ArrayList<Map<String, Object>> edgeList = new ArrayList<Map<String, Object>>();
+		
+		// Node 생성
+		Map<String, Object> pMap = new HashMap<String, Object>();
+		pMap.put("id", "1");
+		pMap.put("name", fileName);
+		pMap.put("label", "root");
+		pMap.put("isFile", false);
+		nodeList.add(pMap);
+		
+		for(Bucket b : agents.getBuckets()) {
+			Map<String, Object> m = new HashMap<String, Object>();
+			TopHits topHit = b.getAggregations().get("agentName");
+			for(SearchHit hit : topHit.getHits()) {
+				m.put("name", hit.getSourceAsMap().get("agentName"));
+				m.put("agentDeptName", hit.getSourceAsMap().get("agentDeptName"));
+			}
+			m.put("id", UUID.randomUUID());
+			m.put("agentId", b.getKeyAsString());
+			m.put("label", "agent");
+			
+			//에이전트별 유출타입
+			Filter outflow = b.getAggregations().get("outflow");
+			Terms outflowType = outflow.getAggregations().get("outflowType");
+			ArrayList<String> outflowList = new ArrayList<String>();
+			for(Bucket outBucket : outflowType.getBuckets()) {
+				
+				TopHits outflowDetail = outBucket.getAggregations().get("topHit");
+				for(SearchHit hit : outflowDetail.getHits()) {
+					
+					String outflowDetailType = null;
+					
+					if(outBucket.getKeyAsString().equals("2")) {
+						outflowDetailType = (String)hit.getSourceAsMap().get("processName");
+					} else {
+						outflowDetailType = (String)hit.getSourceAsMap().get("destDeviceId");
+					}
+					
+					Map<String, Object> subMap = new HashMap<String, Object>();
+					String subKey = UUID.randomUUID().toString();
+					subMap.put("id", subKey);
+					subMap.put("name", outflowDetailType);
+					subMap.put("type", outBucket.getKeyAsString());
+					subMap.put("label", "outflow");
+					nodeList.add(subMap);
+					outflowList.add(subKey);
+				}
+			}
+			
+			m.put("outflow", outflowList);
+			nodeList.add(m);
+		}
+		
+		for(Bucket b : url.getBuckets()) {
+			Map<String, Object> m = new HashMap<String, Object>();
+			m.put("id", UUID.randomUUID());
+			m.put("name", b.getKeyAsString());
+			m.put("label", "url");
+			
+			//url별 실행 브라우저
+			Terms browser = b.getAggregations().get("browser");
+			ArrayList<String> browserList = new ArrayList<String>();
+			
+			
+			for(Bucket browserBucket : browser.getBuckets()) {
+				Map<String, Object> subMap = new HashMap<String, Object>();
+				String subKey = UUID.randomUUID().toString();
+				subMap.put("id", subKey);
+				subMap.put("name", browserBucket.getKeyAsString());
+				subMap.put("label", "browser");
+				nodeList.add(subMap);
+				browserList.add(subKey);
+			}
+			m.put("browser", browserList);
+			nodeList.add(m);
+		}
+		
+		for(SearchHit hit : downPathTop.getHits()) {
+			Map<String, Object> m = new HashMap<String, Object>();
+			m.put("id", UUID.randomUUID());
+			m.put("name", hit.getSourceAsMap().get("filePath"));
+			m.put("label", "downPath");
+			nodeList.add(m);
+			
+		}
+		
+		for(Bucket b : processPath.getBuckets()) {
+			Map<String, Object> m = new HashMap<String, Object>();
+			m.put("id", UUID.randomUUID());
+			m.put("name", b.getKeyAsString());
+			m.put("label", "processPath");
+			nodeList.add(m);
+		}
+		
+		for(Bucket b : parentProcess.getBuckets()) {
+			Map<String, Object> m = new HashMap<String, Object>();
+			m.put("id", UUID.randomUUID());
+			m.put("name", b.getKeyAsString());
+			m.put("label", "parentProcess");
+			nodeList.add(m);
+		}
+		
+//		boolean isAccFilePath = false;
+		
+		for(Bucket b : accFilePath.getBuckets()) {
+			Map<String, Object> m = new HashMap<String, Object>();
+			m.put("id", UUID.randomUUID());
+			m.put("name", b.getKeyAsString());
+			m.put("label", "accFilePath");
+			nodeList.add(m);
+//			isAccFilePath = true;
+		}
+		
+//		if(isAccFilePath) {
+//			pMap.put("id", "2");
+//			pMap.put("label", "accessFile");
+//			nodeList.add(pMap);
+//		}
+		
+		
+		for(Bucket b : remoteIp.getBuckets()) {
+			
+			Terms remotePort = b.getAggregations().get("port");
+			for(Bucket portBucket : remotePort.getBuckets()) {
+				String remoteInfo = b.getKeyAsString() + ":" + portBucket.getKeyAsString();
+				Map<String, Object> m = new HashMap<String, Object>();
+				m.put("id", UUID.randomUUID());
+				m.put("name", remoteInfo);
+				m.put("label", "remoteIp");
+				nodeList.add(m);
+			}
+		}
+		
+		for(Bucket b : srcPath.getBuckets()) {
+			Map<String, Object> m = new HashMap<String, Object>();
+			m.put("id", UUID.randomUUID());
+			m.put("name", b.getKeyAsString());
+			m.put("label", "srcPath");
+			nodeList.add(m);
+		}
+		
+		for(Bucket b : serviceName.getBuckets()) {
+			Map<String, Object> m = new HashMap<String, Object>();
+			m.put("id", UUID.randomUUID());
+			m.put("name", b.getKeyAsString());
+			m.put("label", "serviceName");
+			nodeList.add(m);
+		}
+		
+		if(!appName.equals(AppName.LIVE_PROCESS_SUB)) {
+			for(Bucket b : dllName.getBuckets()) {
+				Map<String, Object> m = new HashMap<String, Object>();
+				m.put("id", UUID.randomUUID());
+				m.put("name", b.getKeyAsString());
+				m.put("label", "dllName");
+				nodeList.add(m);
+			}
+		}
+		
+		
+		// Edge 생성
+		for(Map<String, Object> m : nodeList) {
+			Map<String, Object> edgeMap = new HashMap<String, Object>();
+			edgeMap.put("id", UUID.randomUUID());
+			
+			if(m.get("label").toString().equals("agent")) {
+				edgeMap.put("source", m.get("id"));
+				edgeMap.put("target", "1");
+				edgeMap.put("type", "POSSESS");
+				
+				ArrayList<String> outflow = (ArrayList<String>) m.get("outflow");
+				for(String outflowKey : outflow) {
+					Map<String, Object> edgeSubMap = new HashMap<String, Object>();
+					edgeSubMap.put("id", UUID.randomUUID());
+					edgeSubMap.put("source", outflowKey);
+					edgeSubMap.put("target", m.get("id"));
+					edgeSubMap.put("type", "OUTFLOW");
+					edgeList.add(edgeSubMap);
+				}
+				
+			} else if(m.get("label").toString().equals("url")) {
+				edgeMap.put("source", "1");
+				edgeMap.put("target", m.get("id"));
+				edgeMap.put("type", "ACCESS");
+
+				ArrayList<String> browser = (ArrayList<String>) m.get("browser");
+				for(String browserKey : browser) {
+					Map<String, Object> edgeSubMap = new HashMap<String, Object>();
+					edgeSubMap.put("id", UUID.randomUUID());
+					edgeSubMap.put("source", browserKey);
+					edgeSubMap.put("target", m.get("id"));
+					edgeSubMap.put("type", "BROWSER");
+					edgeList.add(edgeSubMap);
+				}
+				
+			} else if(m.get("label").toString().equals("processPath")) {
+				edgeMap.put("source", "1");
+				edgeMap.put("target", m.get("id"));
+				edgeMap.put("type", "PROCESSPATH");
+				
+			} else if(m.get("label").toString().equals("downPath")) {
+				edgeMap.put("source", "1");
+				edgeMap.put("target", m.get("id"));
+				edgeMap.put("type", "DOWNPATH");
+				
+			} else if(m.get("label").toString().equals("parentProcess")) {
+				edgeMap.put("source", "1");
+				edgeMap.put("target", m.get("id"));
+				edgeMap.put("type", "PARENTPROCESS");
+				
+			} else if(m.get("label").toString().equals("remoteIp")) {
+				edgeMap.put("source", "1");
+				edgeMap.put("target", m.get("id"));
+				edgeMap.put("type", "REMOTEIP");
+				
+			} else if(m.get("label").toString().equals("srcPath")) {
+				edgeMap.put("source", "1");
+				edgeMap.put("target", m.get("id"));
+				edgeMap.put("type", "SRCPATH");
+				
+			} else if(m.get("label").toString().equals("serviceName")) {
+				edgeMap.put("source", "1");
+				edgeMap.put("target", m.get("id"));
+				edgeMap.put("type", "SERVICENAME");
+				
+			} else if(m.get("label").toString().equals("accFilePath")) {
+				edgeMap.put("source", "1");
+				edgeMap.put("target", m.get("id"));
+				edgeMap.put("type", "ACCFILEPATH");
+			} else if(m.get("label").toString().equals("dllName")) {
+				edgeMap.put("source", "1");
+				edgeMap.put("target", m.get("id"));
+				edgeMap.put("type", "DLLNAME");
+			}
+				
+			edgeList.add(edgeMap);
+		}
+		
+		map.put("node", nodeList);
+		map.put("edge", edgeList);
+		
+		return map;
+	}
+	
+	public ArrayList<Map<String, Object>> getEventTimeline(Map<String, Object> param) {
+			
+		String agentId = (String)param.get("agentId");
+		String date = (String)param.get("date");
+		String range = "5m";
+		
+		ArrayList<Map<String, Object>> resultList = new ArrayList<Map<String, Object>>();
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.must(QueryBuilders.termQuery("agentId", agentId));
+		boolQuery.must(QueryBuilders.rangeQuery("@timestamp").gte(date+"||-"+range).lte(date+"||+"+range));
+		
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery)
+				.aggregation(AggregationBuilders.dateHistogram("min").field("@timestamp").dateHistogramInterval(DateHistogramInterval.MINUTE).format("mm").minDocCount(1)
+						.subAggregation(AggregationBuilders.terms("appName").field("appName")));
+		
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		SearchResponse searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		Histogram histogram = searchResponse.getAggregations().get("min");
+		
+		for(Histogram.Bucket entry : histogram.getBuckets()) {
+			Map<String, Object> minuteMap = new HashMap<String, Object>();
+			
+			ArrayList<Map<String, Object>> appNameList = new ArrayList<Map<String, Object>>();
+			Terms appName = entry.getAggregations().get("appName");
+			for(Bucket b :appName.getBuckets()) {
+				Map<String, Object> appNameMap = new HashMap<String, Object>();
+				appNameMap.put("appName", b.getKeyAsString());
+				appNameMap.put("count", b.getDocCount());
+				appNameList.add(appNameMap);
+			}
+			
+			minuteMap.put("minute", entry.getKeyAsString());
+			minuteMap.put("count", entry.getDocCount());
+			minuteMap.put("appList", appNameList);
+			resultList.add(minuteMap);
+		}
+		
+		return resultList;
+	}
+	
+	public Map<String, Object> getEventDetailCount(Map<String, Object> param) {
+		
+		String agentId = (String)param.get("agentId");
+		String selectDate = (String)param.get("selectDate");
+		
+		Map<String, Object> map = new HashMap<String, Object>();
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.must(QueryBuilders.termQuery("agentId", agentId));
+		boolQuery.must(QueryBuilders.rangeQuery("@timestamp").gte(selectDate).lte(selectDate).format("yyyyMMdd'T'HHmm"));
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery);
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		
+		SearchResponse searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		map.put("totalCnt", searchResponse.getHits().getTotalHits());
+		return map;
+	}
+	
+	public ArrayList<Map<String, Object>> getEventDetail(Map<String, Object> param) {
+		
+		String agentId = (String)param.get("agentId");
+		String selectDate = (String)param.get("selectDate");
+		int page = Integer.parseInt((String)param.get("page"));
+		
+		ArrayList<Map<String, Object>> resultList = new ArrayList<Map<String, Object>>();
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		boolQuery.must(QueryBuilders.termQuery("agentId", agentId));
+		boolQuery.must(QueryBuilders.rangeQuery("@timestamp").gte(selectDate).lte(selectDate).format("yyyyMMdd'T'HHmm"));
+		
+		RestHighLevelClient client = esConfig.getRestClient();
+		SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder().query(boolQuery).from(page * 10).size(10).sort("@timestamp", SortOrder.DESC);
+		SearchRequest searchRequest = new SearchRequest(index + "*").types(type).source(searchSourceBuilder);
+		
+		SearchResponse searchResponse = new SearchResponse();
+		try {
+			searchResponse = client.search(searchRequest);
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		for(SearchHit hit : searchResponse.getHits()) {
+			resultList.add(hit.getSourceAsMap());
+		}
+		
+		return resultList;
+		
+	}
+	
+}

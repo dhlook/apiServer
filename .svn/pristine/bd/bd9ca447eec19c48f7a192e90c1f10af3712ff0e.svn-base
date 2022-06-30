@@ -1,0 +1,51 @@
+spring:
+  datasource:
+    driver-class-name: org.mariadb.jdbc.Driver
+    url: jdbc:mysql://10.102.10.159:5100/pimonng?useUnicode=true&characterEncoding=utf-8    
+    username: pimonng
+    password: 'Duzon#123'
+
+  data:
+    elasticsearch:
+      hosts: 10.102.10.159
+      port: 9200
+      index: pimonng-
+      type: pimonng_type
+      
+
+  mvc:
+    view:
+      prefix: /WEB-INF/jsp/
+      suffix: .jsp
+    locale: ko_KR
+
+  resources:
+    chain:
+      cache: true 
+      
+  messages:
+    basename: classpath:/messages/message
+    encoding: UTF-8
+    cache-seconds: -1
+    
+logging:
+  level:
+#    org.springframework.web: debug
+    com.douzone: debug
+    
+application:
+    security:
+        jwt:
+            #secret: 5867a8374e7c0f6284b177b48faf89e1c79d72d8
+            secret: pimonngsecretkey
+            token-validity-in-seconds: 1800000
+            token-validity-in-seconds-for-remember-me: 2592000
+            
+neo4j:
+  uri: bolt://10.102.10.159:7687
+  domain: 10.102.10.159
+  bolt-port: 7687
+  rest-port: 7474
+  id: neo4j
+  password: 'Duzon#123'
+

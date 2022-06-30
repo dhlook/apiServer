@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+  
+<mapper namespace="com.slamdh.apiserver.mapper.CustomMapper">
+
+
+	<select id="getCommonCodes" parameterType="HashMap" resultType="HashMap" statementType="CALLABLE"> 
+     	call sp_common_code_select(#{parentCode}, #{code})  	   
+    </select> 
+
+	<select id="getGroupList" parameterType="HashMap" resultType="HashMap" statementType="CALLABLE"> 
+     	call sp_admin_group_select(#{customId})  	   
+    </select> 
+
+
+
+
+
+
+
+	<select id="SelectCustomAgentCount" parameterType="HashMap" resultType="HashMap" statementType="CALLABLE"> 
+     	call usp_custom_agent_select(#{customId})  	   
+    </select>    
+
+	<select id="SelectCustomAdminLists" parameterType="HashMap" resultType="HashMap" statementType="CALLABLE"> 
+		call usp_custom_admin_list_select(#{customId})  	   
+	</select>
+    
+	<select id="InsertCustomAdmin" parameterType="HashMap" resultType="int" statementType="CALLABLE"> 
+		call usp_custom_admin_insert(#{customId} , #{adminId} , #{password} , #{adminName}  ,#{email} ,#{phone} ,#{cellphone}, #{menu_option}, #{role_id}, #{groupid})  	    
+	</select>
+     
+	<select id="DeleteCustomAdmin" parameterType="HashMap" resultType="int" statementType="CALLABLE"> 
+		call usp_custom_admin_delete(#{customId} , #{adminId} )  	   
+	</select>
+
+	<select id="SelectCustomDeptLists" parameterType="HashMap" resultType="HashMap" statementType="CALLABLE"> 
+		call usp_custom_dept_select(#{customId} , #{deptLev} )  	   
+	</select>	
+	
+	<select id="InsertCustomDept" parameterType="HashMap" resultType="int" statementType="CALLABLE"> 
+		call usp_custom_dept_insert(  #{customId} ,  #{groupid} ,  #{groupname} ,  #{parentgroupid} ,  #{GroupDepth} , #{adminid} ) 	   
+	</select>	
+
+	<select id="DeleteCustomDept" parameterType="HashMap" resultType="int" statementType="CALLABLE"> 
+		call usp_custom_dept_delete(  #{customId} ,  #{groupid} ) 	    
+	</select>	
+	  
+</mapper>
+  
+ 

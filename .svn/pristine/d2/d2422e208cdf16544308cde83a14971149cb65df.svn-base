@@ -1,0 +1,97 @@
+package com.slamdh.apiserver.controller;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseBody;
+
+import com.slamdh.apiserver.ElasticsearchConfiguration;
+import com.slamdh.apiserver.service.DashboardService;
+import com.slamdh.apiserver.service.ProfileService;
+
+@Controller
+public class MainController {
+
+	static final Logger logger = LoggerFactory.getLogger(MainController.class);
+
+	@Autowired
+	ElasticsearchConfiguration esConfig;
+	
+	@Autowired
+	ProfileService profileService;
+	
+	@Autowired
+	DashboardService dashboardService;
+	
+	
+	@RequestMapping({"/api/dashboard/summary"})
+	@ResponseBody
+	Map<String, Object> summary(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String dateType = request.getParameter("dateType");
+		params.put("dateType", dateType);
+		
+		return dashboardService.getSummary(params);
+		
+	}
+	
+	@RequestMapping({"/api/dashboard/threats/review"})
+	@ResponseBody
+	Map<String, Object> threatsReview(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String dateType = request.getParameter("dateType");
+		params.put("dateType", dateType);
+		
+		return dashboardService.getThreatsReview(params);
+		
+	}
+	
+	@RequestMapping({"/api/dashboard/threats/chart"})
+	@ResponseBody
+	ArrayList<Map<String, Object>> threatsChart(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String dateType = request.getParameter("dateType");
+		params.put("dateType", dateType);
+		
+		return dashboardService.getThreatsChart(params);
+		
+	}
+	
+	@RequestMapping({"/api/dashboard/realtime/count"})
+	@ResponseBody
+	Map<String, Object> realtimeEventCount(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String type = request.getParameter("type");
+		params.put("type", type);
+		return dashboardService.getRealtimeEventCount(params);
+		
+	}
+	
+	@RequestMapping({"/api/dashboard/realtime"})
+	@ResponseBody
+	ArrayList<Map<String, Object>> realtimeEvent(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String page = request.getParameter("page");
+		String type = request.getParameter("type");
+		params.put("page", page);
+		params.put("type", type);
+		
+		return dashboardService.getRealtimeEvent(params);
+		
+	}
+	
+}

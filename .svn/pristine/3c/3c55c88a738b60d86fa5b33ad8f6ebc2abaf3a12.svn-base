@@ -1,0 +1,68 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+                             
+<mapper namespace="com.slamdh.apiserver.mapper.AgentMapper">
+
+	<select id="getPolicyApplyAgentCount" parameterType="HashMap" resultType="HashMap" statementType="CALLABLE"> 
+     	call sp_policy_apply_agent_count(#{customId})  	   
+    </select>
+
+	<select id="getAgentPolicyList" parameterType="HashMap" resultType="HashMap" statementType="CALLABLE"> 
+     	call sp_agent_policy_list_select(#{customId}, #{policyType})  	   
+    </select>
+
+
+	<select id="getMediaconPolicyApplyAgentCount" parameterType="HashMap" resultType="HashMap" statementType="CALLABLE"> 
+     	call sp_policy_apply_agent_count_media(#{customId})  	   
+    </select>
+
+	<select id="getAgentExceptUSBMappingCount" parameterType="HashMap" resultType="int" statementType="CALLABLE"> 
+     	call sp_agent_mapping_exceptusb_count(#{customId})  	   
+    </select>
+
+
+
+
+
+	<select id="SelectAgentLists" parameterType="HashMap" resultType="HashMap" statementType="CALLABLE"> 
+     	call usp_agent_select(#{customId}, #{groupId}, #{wheresql})  	   
+    </select>   
+    
+	<select id="UpdateAgentData" parameterType="HashMap" resultType="int" statementType="CALLABLE"> 
+     	call usp_agent_update(#{customId}, #{agentId}, #{username}, #{email}, #{phone}, #{cellphone}, #{groupid})  	   
+    </select>
+    
+	<select id="SelectTempPolicyList"   resultType="HashMap" statementType="CALLABLE"> 
+     	call usp_temppolicylist_select()  	   
+    </select>     
+    
+	<select id="AgentPolicyApply"   parameterType="HashMap"  resultType="int" statementType="CALLABLE"> 
+     	call usp_agent_policy_apply(#{customId}, #{agentId}, #{sendJson}, #{Type}, #{guid})  	   
+    </select>        
+    
+	<select id="AgentPolicyApply_list"   parameterType="HashMap"  resultType="int" statementType="CALLABLE"> 
+     	call usp_agent_policy_apply_list(#{agentId}, #{dlptype}, #{version}, #{policyid}, #{adminid})  	   
+    </select>       
+    
+	<select id="selectUninstallAgent" parameterType="HashMap" resultType="HashMap" statementType="CALLABLE"> 
+     	call Usp_Agent_Delete_Request_Select(#{customId})  	   
+    </select>    
+    
+	<select id="UninstallAgentResult" parameterType="HashMap" resultType="int" statementType="CALLABLE"> 
+     	call Usp_Agent_UnInstallList_Manager(#{agentId} , #{adminId}, #{sendJson}, #{cancleresult}, #{checkflag} )  	   
+    </select> 
+    
+	<select id="OfflineAgentDeleteDatabase" parameterType="HashMap" resultType="int" statementType="CALLABLE"> 
+     	call usp_agent_delete_lists_insert(#{customId} , #{agentId}, #{adminId} )  	   
+    </select>      
+    
+	<select id="DeleteAgentData" parameterType="HashMap" resultType="int" statementType="CALLABLE"> 
+     	call usp_agent_delete(#{customId} , #{agentId} )  	   
+    </select>      
+    
+	<select id="selectAgentDeleteList" parameterType="HashMap" resultType="HashMap" statementType="CALLABLE"> 
+     	call usp_agent_delete_lists_select(#{customId}, #{agentName})  	   
+    </select>        
+      
+</mapper>

@@ -1,0 +1,161 @@
+package com.slamdh.apiserver.controller;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
+
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseBody;
+
+import com.slamdh.apiserver.service.PrintModuleService;
+
+@Controller
+public class PrintModuleController {
+
+	static final Logger logger = LoggerFactory.getLogger(PrintModuleController.class);
+
+	@Autowired
+	PrintModuleService printModuleService;
+	
+	@RequestMapping({"/api/print/dashboard"})
+	@ResponseBody
+	Map<String, Object> searchList(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String customId = request.getParameter("customId");
+		params.put("customId", customId);
+		params.put("startTime", "9:00");
+		params.put("endTime", "18:00");
+		
+		return printModuleService.getDashBoard(params);
+		
+	}
+	
+	
+	@RequestMapping({"/api/print/policy/list"})
+	@ResponseBody
+	ArrayList<Map<String, Object>> policyList(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String customId = request.getParameter("customId");
+		params.put("customId", customId);
+		params.put("policyType", "1");
+		return printModuleService.getPolicyList(params);
+		
+	}
+	
+	@RequestMapping({"/api/print/policy/agentlist"})
+	@ResponseBody
+	String agentGroupList(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String customId = request.getParameter("customId");
+		params.put("customId", customId);
+		params.put("policyType", "1");
+		return printModuleService.getAgentGroupList(params);
+		
+	}
+	
+	@RequestMapping({"/api/print/policy/apply"})
+	@ResponseBody
+	Map<String, Object> policyApply(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String customId = request.getParameter("customId");
+		String policyId = request.getParameter("policyId");
+		String agentIds = request.getParameter("agentIds");
+		params.put("customId", customId);
+		params.put("policyId", policyId);
+		params.put("agentIds", agentIds);
+		params.put("policyType", 1);
+		return printModuleService.policyAppy(params);
+		
+	}
+	
+	@RequestMapping({"/api/print/policy/create"})
+	@ResponseBody
+	Map<String, Object> policyCreate(HttpServletRequest request, HttpServletResponse response, @RequestBody Map<String, Object> map) {
+        return printModuleService.policyCreate(map);
+	} 
+	
+	@RequestMapping({"/api/print/policy/detail"})
+	@ResponseBody
+	Map<String, Object> policyDetail(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String customId = request.getParameter("customId");
+		String policyId = request.getParameter("policyId");
+		params.put("customId", customId);
+		params.put("policyId", policyId);
+
+        return printModuleService.policyDetail(params);
+	} 
+	
+	@RequestMapping({"/api/print/policy/delete"})
+	@ResponseBody
+	Map<String, Object> policyDelete(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String customId = request.getParameter("customId");
+		String policyId = request.getParameter("policyId");
+		params.put("customId", customId);
+		params.put("policyId", policyId);
+
+        return printModuleService.policyDelete(params);
+		
+	} 
+	
+	@RequestMapping({"/api/print/policy/copy"})
+	@ResponseBody
+	Map<String, Object> policyCopy(HttpServletRequest request, HttpServletResponse response) {
+		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String customId = request.getParameter("customId");
+		String policyId = request.getParameter("policyId");
+		String policyName = request.getParameter("policyName");
+		String adminId = request.getParameter("adminId");
+		params.put("customId", customId);
+		params.put("policyId", policyId);
+		params.put("policyName", policyName);
+		params.put("adminId", adminId);
+
+        return printModuleService.policyCopy(params);
+		
+	} 
+	
+	@RequestMapping({"/api/print/log/list"})
+	@ResponseBody
+	ArrayList<Map<String, Object>> printLogList(HttpServletRequest request, HttpServletResponse response) {
+		
+	        		
+		Map<String, Object> params = new HashMap<String, Object>();
+		String customId = request.getParameter("customId");
+		String page = request.getParameter("page");
+		String fromDate = request.getParameter("fromDate");
+		String toDate = request.getParameter("toDate");
+		String searchType = request.getParameter("searchType");
+		String searchText = request.getParameter("searchText");
+		String advancedQuery = request.getParameter("advancedQuery");
+		
+		params.put("customId", customId);
+		params.put("page", page);
+		params.put("fromDate", fromDate);
+		params.put("toDate", toDate);
+		params.put("searchType", searchType);
+		params.put("searchText", searchText);
+		params.put("advancedQuery", advancedQuery);
+		
+		return printModuleService.getPrintLogList(params);
+		
+	}
+	
+	
+}

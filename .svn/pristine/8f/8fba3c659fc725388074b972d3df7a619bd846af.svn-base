@@ -1,0 +1,659 @@
+package com.slamdh.apiserver.service;
+
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
+
+import org.json.simple.JSONArray;
+import org.json.simple.JSONObject;
+import org.json.simple.parser.JSONParser;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import com.slamdh.apiserver.controller.AgentController;
+import com.slamdh.apiserver.mapper.AgentMapper; 
+import com.slamdh.apiserver.utils.CommonUtils;
+import com.slamdh.apiserver.utils.TimeUtilLib; 
+
+import java.util.UUID;
+
+@Service
+public class AgentService {
+	@Autowired
+	AgentMapper agentMapper;
+	
+	static final Logger logger = LoggerFactory.getLogger(AgentController.class);	
+		
+    //		  에이전트 목록조회
+	public ArrayList<Map<String, Object>>  SelectAgentLists(Map<String, Object> map) throws Exception {		
+		return agentMapper.SelectAgentLists(map); 
+	}
+	
+	
+	// 에이전트 삭제
+	public  int  UninstallAgentData(Map<String, Object> map) throws Exception {
+		int result = 0;
+		Map<String, Object> params = new HashMap<String, Object>();
+		String agentList[] = map.get("agentId").toString().split(",");
+		String customId = map.get("customId").toString();
+		String adminId = map.get("adminId").toString();
+		String command_type = map.get("command_type").toString();
+		TimeUtilLib timeu = new TimeUtilLib();	
+	
+		String result_xml = "{\"UNINSTALLTYPE\":1\"REASON\":}";	//항상 승인, 반려 사유 없음 
+		
+		for(int i =0; i < agentList.length; i++){
+			String random_guid = "{" + UUID.randomUUID() +  "}";
+			result_xml = 
+					"{\"UNINSTALLTYPE\":\"1\",\"REASON\":\"\","
+					+"\"SENDTIME\":\""+timeu.todaydate("yyyy-MM-dd HH:mm:ss")+"\",\"GUID\":\""+random_guid+"\"}";	//항상 승인, 반려 사유 없음
+ 			 		
+		   params.put("customId", customId);
+		   params.put("agentId",   agentList[i]);
+		   params.put("sendJson", result_xml);
+		   params.put("Type",      command_type);  	
+		   params.put("guid",      random_guid);		   
+		   result = agentMapper.AgentPolicyApply(params);
+
+		}				
+		return result;
+	}
+	
+	public  int  UpdateAgentData(Map<String, Object> map) throws Exception {		
+		return agentMapper.UpdateAgentData(map); 
+	}	
+	
+	
+	public ArrayList<Map<String, Object>>  SelectTempPolicyLists() throws Exception {		
+		return agentMapper.SelectTempPolicyList(); 
+	}
+	 
+	public  int  AgentPolicyApply(Map<String, Object> map) throws Exception {	
+		int result  = 0;
+		   
+		// 해당 부분에서 데이터 매핑 작업을 해줘야 함
+		String agentList[] = map.get("agentlist").toString().split(",");
+		String policydata = map.get("policydata").toString();
+		
+		System.out.println("=========================");  
+		System.out.println(policydata);
+	    String version = "";
+	    String policyid = "";	
+	    
+	    try {
+			   JSONParser parser = new JSONParser(); 
+			   JSONObject seljsonObject = new JSONObject();
+			   seljsonObject = (JSONObject) parser.parse(policydata);
+			   version  = seljsonObject.get("Version").toString();
+			   policyid  = seljsonObject.get("policyId").toString();	  			
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		} 
+		
+		// json 재 파싱 해서 해당 데이터에 맞는 정책 생성 필요
+		ArrayList<Map<String, Object>>  resultMap = new ArrayList<Map<String, Object>> ();
+		
+		try {
+			resultMap = SelectTempPolicyLists();
+			String policyJson  = "";
+			String subdlptype = "";
+			String SendJson = "" ;
+			for(Map<String, Object> map1 : resultMap) {
+				SendJson = "";
+				policyJson = map1.get("policyjson") + "";
+				subdlptype = map1.get("subdlptype")+ "";	
+				if (policyid.equals("{121A523F-8F22-4372-A37C-E7B8D2FC5875}")) {
+					SendJson = "";
+				} else {
+					   switch (subdlptype) {
+					   	case "1" : SendJson = dlpPolicyEdit( policyJson , policydata); break; 
+					   	case "2" : SendJson = pcPolicyEdit( policyJson , policydata); break;
+					   	case "3" : SendJson = fileconPolicyEdit( policyJson , policydata); break;
+					   	case "4" : SendJson = agentPolicyEdit( policyJson , policydata); break;
+					   	case "5" : SendJson = pcsecuPolicyEdit( policyJson , policydata); break;
+//					   	case "6" : SendJson = updatePolicyEdit( policyJson , policydata); break;
+					   }					   				
+				}
+
+			   System.out.println(SendJson);
+		
+			   
+			   // 선택 사용자에게 정책 적용하는 로직 추가
+			   for (int loop =0; loop < agentList.length ; loop++) {
+				   if (subdlptype.toString().equals("1")) {
+					   // 에이전트 적용된 정책 테이블에 입력 
+					   Map<String, Object> params = new HashMap<String, Object>();
+					   params.put("agentId",   agentList[loop]);
+					   params.put("dlptype",      subdlptype);  
+					   params.put("version",     version  );
+					   params.put("policyid",     policyid);		
+					   params.put("adminid",     "adminid");	
+					   result = AgentPolicyApply_list(params);  						 						   					 
+				   }
+				   // 에이전트 폴링리스트에 입력
+				   Map<String, Object> params = new HashMap<String, Object>();
+				   params.put("customId", map.get("customId"));
+				   params.put("agentId",   agentList[loop]);
+				   params.put("sendJson", SendJson.toString());
+				   params.put("Type",      subdlptype);  
+				   params.put("guid",      "");				   
+				   result = agentMapper.AgentPolicyApply(params); 
+			   }
+			   			 		  	    
+			} 
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}	
+		 		
+		return result;	    
+		
+//		return agentMapper.AgentPolicyApply(map); 
+	}
+	
+	public  int  AgentPolicyApply_list(Map<String, Object> map) throws Exception {		 
+		return agentMapper.AgentPolicyApply_list(map); 
+	}		
+	
+		 
+  public String dlpPolicyEdit(String tmppolicy, String sendpolicy) {
+	  CommonUtils util = new CommonUtils();
+	  
+	  JSONParser selparser = new JSONParser();
+	  JSONObject seljsonObject = new JSONObject();
+	  
+	  
+	  JSONParser parser = new JSONParser(); 
+	  JSONObject jsonObject = new JSONObject();
+	  try {
+		     seljsonObject = (JSONObject) parser.parse(sendpolicy);
+		  
+			 jsonObject = (JSONObject) parser.parse(tmppolicy);
+			 JSONObject policyinfo = new JSONObject();
+			 JSONObject policy = new JSONObject();
+			 		 			 
+			 // 정책 정보
+			 policyinfo = (JSONObject)jsonObject.get("POLICYINFO");
+			 policyinfo.put("NAME",    util.urlEncode( seljsonObject.get("PolicyName") + ""));
+			 policyinfo.put("VERSION", seljsonObject.get("Version"));
+			 policyinfo.put("ID",          seljsonObject.get("policyId"));
+			 
+			 policy = (JSONObject)jsonObject.get("POLICY");			
+			 
+			 // 매체, 네트워크, 미디어 사용 유무
+			 policy.put("MEDIACONTROLTYPE", seljsonObject.get("isMediaCon"));
+			 policy.put("NETCONTROLTYPE", seljsonObject.get("isNetCon"));
+			 policy.put("PRINTTYPE", seljsonObject.get("isPrintCon"));
+			 
+			 
+			 System.out.println("realtime ====== " + seljsonObject.get("isRealtime")); 	 
+			 System.out.println("MEDIACONTROLTYPE ====== " + policy.get("MEDIACONTROLTYPE"));
+			 System.out.println("NETCONTROLTYPE ====== " + policy.get("NETCONTROLTYPE"));
+			 System.out.println("PRINTTYPE ====== " + policy.get("PRINTTYPE"));
+			 
+			 // 워터마크 영역
+			 JSONObject policy_water = new JSONObject();			 
+			 policy_water = (JSONObject) policy.get("WATERMARK"); 						 
+			 policy_water.put("USE", seljsonObject.get("isWatermark").toString().equals("1")?true:false);
+			 policy.put("WATERMARK", policy_water);
+			 
+			 System.out.println("watermark ====== " + policy_water.get("USE"));
+			 
+			 // 매체 영역
+			 // CONTROLTYPE 의 경우 상세 페이지가 구성되면 해당 항목도 거기에 맞게 변경을 해줘야 한다 
+			 // 이거 안하믄 나중에 골때려짐 시밤 읽기전용 / 허용 / 차단 에 따른 컨트롤을 위한것
+			 JSONArray jsonList = new JSONArray(); // JSONObject list 를 넣을 JSONArray
+			 JSONObject policy_media_sub = new JSONObject();	 
+			 for(int i=0; i < 11; i++){
+					if(i != 2){
+						policy_media_sub = new JSONObject();
+						policy_media_sub.put("MEDIATYPE", i);
+						policy_media_sub.put("USE", seljsonObject.get("isRealtime").toString().equals("1")?true:false);
+						if (seljsonObject.get("isMediaCon").toString().equals("0") || seljsonObject.get("isMediaCon").toString().equals("1")) {
+							policy_media_sub.put("CONTROLTYPE", 0);	
+						}
+						else if (seljsonObject.get("isMediaCon").toString().equals("2")) {
+							if(i == 4 || i == 5 || i == 6  || i == 7 ||  i == 9 || i == 10)
+								policy_media_sub.put("CONTROLTYPE", 2);
+							else { 
+								 // 상세 내역 조회 시 해당 항목 값은 변경됨
+								if(i == 0) policy_media_sub.put("CONTROLTYPE", 0);
+								else if(i == 1)  policy_media_sub.put("CONTROLTYPE", 0);
+								else if(i == 3)  policy_media_sub.put("CONTROLTYPE", 0);
+								else if(i == 8)  policy_media_sub.put("CONTROLTYPE", 0);
+								else policy_media_sub.put("CONTROLTYPE", 2);						 
+							} 
+						}
+						else if (seljsonObject.get("isMediaCon").toString().equals("3")) {
+							policy_media_sub.put("CONTROLTYPE", 2);
+//								if(i == 4 || i == 5 || i == 6 || i == 7 ||  i == 9 || i == 10)
+//									policy_media_sub.put("CONTROLTYPE", 2);
+//								else{
+//									
+//									if(i == 0) policy_media_sub.put("CONTROLTYPE", seljsonObject.get("isMediaCon"));
+//									else if(i == 1) policy_media_sub.put("CONTROLTYPE", seljsonObject.get("isMediaCon"));
+//									else if(i == 3) policy_media_sub.put("CONTROLTYPE", seljsonObject.get("isMediaCon"));
+//									else if(i == 8) policy_media_sub.put("CONTROLTYPE", seljsonObject.get("isMediaCon"));
+//									else policy_media_sub.put("CONTROLTYPE", 2);
+//								}							
+						}
+						jsonList.add(policy_media_sub);
+					}
+			 }
+			 policy.put("MEDIACONTROL", jsonList);
+			 System.out.println("MEDIACONTROL ==== " + jsonList.toString());
+				 
+			// 네트워크 영역 
+			 JSONArray policy_net = new JSONArray();
+			 JSONObject policy_net_sub = new JSONObject();	 
+			 JSONArray policy_net_process = new JSONArray();	 
+			 JSONObject policy_net_process_sub = new JSONObject();
+			 policy_net  = (JSONArray) policy.get("NETCONTROL");		
+			 JSONArray jsonList_sub = new JSONArray(); // JSONObject list 를 넣을 JSONArray	
+			 jsonList = new JSONArray(); // JSONObject list 를 넣을 JSONArray
+			 
+			 for(int i=0; i < policy_net.size(); i++){ 				 
+				 policy_net_sub  = (JSONObject) policy_net.get(i);
+				 policy_net_sub.put("USE", seljsonObject.get("isRealtime").toString().equals("1")?true:false );		
+				 policy_net_sub.put("BLOCK", seljsonObject.get("isNetCon").toString().equals("3")?true:false);  
+	  				 
+				 jsonList_sub = new JSONArray(); 
+				 policy_net_process =  (JSONArray) policy_net_sub.get("PROCESSLIST");		
+				 for(int j=0; j < policy_net_process.size(); j++){
+					 policy_net_process_sub = new JSONObject(); 
+					 policy_net_process_sub = (JSONObject) policy_net_process.get(j);
+					 policy_net_process_sub.put("BLOCK", seljsonObject.get("isNetCon").toString().equals("3")?true:false);  					 
+					 jsonList_sub.add(policy_net_process_sub); 	  
+				 }
+				 policy_net_sub.put("PROCESSLIST", jsonList_sub);
+				 jsonList.add(policy_net_sub);
+			 }
+			 policy.put("NETCONTROL", jsonList);	
+			 System.out.println("NETCONTROL ==== " + jsonList.toString());
+			 jsonObject.put("POLICYINFO",policyinfo );
+			 jsonObject.put("POLICY",policy );
+			 
+			 System.out.println("POLICY ==== " + jsonObject.toString());
+			 
+			 
+			 return jsonObject.toString();
+			  
+	  }catch(Exception e) {
+			logger.info(e.getMessage());
+		}	
+	  	  
+	  return "";
+  }
+  
+  public String pcPolicyEdit(String tmppolicy, String sendpolicy) {  
+	  CommonUtils util = new CommonUtils();	 
+	 
+	  JSONParser parser = new JSONParser(); 
+	  JSONObject jsonObject = new JSONObject();	  
+	  JSONObject seljsonObject = new JSONObject();
+	  
+	  try {
+		     seljsonObject = (JSONObject) parser.parse(sendpolicy);			  
+			 jsonObject    = (JSONObject) parser.parse(tmppolicy);		  
+		  
+			 JSONObject policyinfo = new JSONObject();
+			 JSONObject policy = new JSONObject();			 
+		  
+			 // 정책 정보
+			 policyinfo = (JSONObject)jsonObject.get("POLICYINFO");
+			 policyinfo.put("NAME",    util.urlEncode( seljsonObject.get("PolicyName") + ""));
+			 policyinfo.put("VERSION", seljsonObject.get("Version"));
+			 policyinfo.put("ID",          seljsonObject.get("policyId"));
+			 
+			 policy = (JSONObject)jsonObject.get("POLICY");			
+			 
+			 // 웹사이트 차단
+			 JSONObject policy_sub = new JSONObject();			 
+			 policy_sub = (JSONObject) policy.get("WEBSITECONTROL");		
+			 policy_sub.put("USE", seljsonObject.get("isWebBlock") .toString().equals("1")?true:false); 
+			 policy.put("WEBSITECONTROL", policy_sub);
+			 
+			 // 프로세스 
+			 policy_sub = new JSONObject();			 
+			 policy_sub = (JSONObject) policy.get("PROCESSCONTROL");		
+			 policy_sub.put("USE", seljsonObject.get("isProcessBlock") .toString().equals("1")?true:false); 
+			 policy.put("PROCESSCONTROL", policy_sub);		
+			 
+//				 // 파일접근제어 -- 현재 정책에는 항목이 빠져있음 이거 추가해야함 
+//				 policy_sub = new JSONObject();			 
+//				 policy_sub = (JSONObject) policy.get("FILEAAAA");		
+//				 policy_sub.put("USE", seljsonObject.get("FILEAAAA") .toString().equals("1")?true:false); 
+//				 policy.put("FILEAAAA", policy_sub);			 
+			 
+			 // 화면 캡쳐 차단 SCREENCAPTURE 
+			 policy_sub = new JSONObject();			 
+			 policy_sub = (JSONObject) policy.get("SCREENCAPTURE");		
+			 policy_sub.put("USE", seljsonObject.get("isScreencaptureBlock") .toString().equals("1")?true:false); 
+			 policy.put("SCREENCAPTURE", policy_sub);	
+			 
+			 // 공유폴더 접근 차단 EXCEPTSHAREFOLDER
+			 policy_sub = new JSONObject();			 
+			 policy_sub = (JSONObject) policy.get("EXCEPTSHAREFOLDER");		
+			 policy_sub.put("USE", seljsonObject.get("isShareFolderBock") .toString().equals("1")?true:false); 
+			 policy.put("EXCEPTSHAREFOLDER", policy_sub);	
+			 
+			 // 워터마크 사용
+			 policy_sub = new JSONObject();			 
+			 policy_sub = (JSONObject) policy.get("EXCEPTSHAREFOLDER");		
+			 policy_sub.put("USE", seljsonObject.get("isShareFolderBock") .toString().equals("1")?true:false); 
+			 policy.put("EXCEPTSHAREFOLDER", policy_sub);	
+			 
+			 // 블루투스
+			 policy.put("USE", seljsonObject.get("isBluetooth") .toString().equals("1")?true:false);
+			 
+			 // 적외선 포트
+			 policy.put("USE", seljsonObject.get("isDirectport") .toString().equals("1")?true:false);
+			 
+			 // 시리얼포트
+			 policy.put("USE", seljsonObject.get("isSerialport") .toString().equals("1")?true:false); 
+			 
+			 //클립보드
+			 policy.put("USE", seljsonObject.get("isClipboard") .toString().equals("1")?true:false); 
+			 
+			 // 무선랜
+			 policy.put("USE", seljsonObject.get("islan") .toString().equals("1")?true:false); 
+			 
+			 
+			 //윈도우 패스워드,  화면보호기 
+			 policy_sub = new JSONObject();			 
+			 policy_sub = (JSONObject) policy.get("PCOPTION");
+			 policy_sub.put("USE", seljsonObject.get("isPCCon") .toString().equals("1")?true:false);
+			 
+			 JSONObject policy_sub_detail = new JSONObject();	
+			 policy_sub_detail = (JSONObject) policy_sub.get("PASSWORD"); 
+			 policy_sub_detail.put("USE", seljsonObject.get("ispassword") .toString().equals("1")?true:false);
+			 policy_sub.put("PASSWORD", policy_sub_detail);
+			 
+			 policy_sub_detail = new JSONObject();	
+			 policy_sub_detail = (JSONObject) policy_sub.get("SCREENSAVER");
+			 policy_sub_detail.put("USE", seljsonObject.get("isscreensaver") .toString().equals("1")?true:false);
+			 policy_sub.put("SCREENSAVER", policy_sub_detail);			 
+			 
+			 policy.put("PCOPTION", policy_sub);	
+			 
+			 jsonObject.put("POLICYINFO",policyinfo );
+			 jsonObject.put("POLICY",policy );
+	 
+			 
+			 return jsonObject.toString();
+	  }catch(Exception e) {
+			logger.info(e.getMessage());
+		}	
+	  
+	  return "";
+  }
+
+  public String fileconPolicyEdit(String tmppolicy, String sendpolicy){
+	  CommonUtils util = new CommonUtils();
+	  	 
+	  JSONObject seljsonObject = new JSONObject();	  
+	  
+	  JSONParser parser = new JSONParser(); 
+	  JSONObject jsonObject = new JSONObject();
+	  try {
+		     seljsonObject = (JSONObject) parser.parse(sendpolicy);
+			  
+			 jsonObject = (JSONObject) parser.parse(tmppolicy);
+			 JSONObject policyinfo = new JSONObject();
+			 JSONObject policy = new JSONObject();
+			 		 			 
+			 // 정책 정보
+			 policyinfo = (JSONObject)jsonObject.get("POLICYINFO");
+			 policyinfo.put("NAME",    util.urlEncode( seljsonObject.get("PolicyName") + ""));
+			 policyinfo.put("VERSION", seljsonObject.get("Version"));
+			 policyinfo.put("ID",          seljsonObject.get("policyId"));
+			 
+			 policy = (JSONObject)jsonObject.get("POLICY");			
+			 
+			 // 파일 접근제어 확장자
+			 JSONObject policy_sub = new JSONObject();			 
+			 policy_sub = (JSONObject) policy.get("EXTCONTROL");		
+			 policy_sub.put("USE", seljsonObject.get("isFileBlock") .toString().equals("1")?true:false); 
+			 policy.put("EXTCONTROL", policy_sub);			
+			 
+			 // 프로세스 목록
+			 policy_sub = new JSONObject();			 
+			 policy_sub = (JSONObject) policy.get("PROCESSCONTROL");		
+			 policy_sub.put("USE", seljsonObject.get("isFileBlock") .toString().equals("1")?true:false); 
+			 policy.put("PROCESSCONTROL", policy_sub);			 
+			 
+			 
+			 jsonObject.put("POLICYINFO",policyinfo );
+			 jsonObject.put("POLICY",policy );
+			 
+			 return jsonObject.toString();
+	  }catch(Exception e) {
+			logger.info(e.getMessage());
+		}	
+	  
+	  return "";
+  }
+
+  public String agentPolicyEdit(String tmppolicy, String sendpolicy) {
+	  CommonUtils util = new CommonUtils();
+	  	 
+	  JSONObject seljsonObject = new JSONObject();
+	  
+	  
+	  JSONParser parser = new JSONParser(); 
+	  JSONObject jsonObject = new JSONObject();
+	  try {
+		     seljsonObject = (JSONObject) parser.parse(sendpolicy);
+		  
+			 jsonObject = (JSONObject) parser.parse(tmppolicy);
+			 JSONObject policyinfo = new JSONObject();
+			 JSONObject policy = new JSONObject();
+			 		 			 
+			 // 정책 정보
+			 policyinfo = (JSONObject)jsonObject.get("POLICYINFO");
+			 policyinfo.put("NAME",    util.urlEncode( seljsonObject.get("PolicyName") + ""));
+			 policyinfo.put("VERSION", seljsonObject.get("Version"));
+			 policyinfo.put("ID",          seljsonObject.get("policyId"));
+			 
+			 policy = (JSONObject)jsonObject.get("POLICY");
+			 
+             // 사용자 행위 수집
+			 JSONArray jsonList = new JSONArray(); // JSONObject list 를 넣을 JSONArray
+			 JSONArray policy_used  = (JSONArray) policy.get("ANALYZER");	
+			 JSONObject policy_used_sub = new JSONObject();
+			 
+			 for(int i=0; i < policy_used.size(); i++){ 			
+				 policy_used_sub  = (JSONObject) policy_used.get(i); 
+				 policy_used_sub.put("ISANALYZE",  seljsonObject.get("isAgentCollect").toString().equals("1")?true:false);  
+				 jsonList.add(policy_used_sub);  
+			 }
+			 policy.put("ANALYZER", jsonList);
+			 
+			 System.out.println("ANALYZER ==== " + jsonList.toString());
+			 
+			 // 파일 분석
+			 JSONObject policy_sub = new JSONObject();			 
+			 policy_sub = (JSONObject) policy.get("FILEINFO");		
+			 policy_sub.put("ANALYZEROR",  seljsonObject.get("isDocuCollect").toString().equals("1")?true:false);
+			 policy_sub.put("NETDRIVE",  seljsonObject.get("isDocuCollect").toString().equals("1")?true:false);
+			 policy_sub.put("ISFILESIGNATURE",  seljsonObject.get("isDocuCollect").toString().equals("1")?true:false);
+			 policy_sub.put("ISFILEENCRYPT",  seljsonObject.get("isDocuCollect").toString().equals("1")?true:false);
+			 policy_sub.put("ISREGEXPR",  seljsonObject.get("isDocuCollect").toString().equals("1")?true:false);
+			 policy_sub.put("ISMD5",  seljsonObject.get("isDocuCollect").toString().equals("1")?true:false);
+			 policy_sub.put("ISSHA256",  seljsonObject.get("isDocuCollect").toString().equals("1")?true:false);							
+			 policy.put("FILEINFO", policy_sub);		 
+			 
+			 System.out.println("FILEINFO ==== " + policy_sub.toString());
+			 
+			 // 메일 분석
+			 policy_sub = new JSONObject();			 
+			 policy_sub = (JSONObject) policy.get("MAILINFO");	
+			 policy_sub.put("ANALYZEROR",  seljsonObject.get("isMailCoolect").toString().equals("1")?true:false);
+			 policy_sub.put("SUBJECT",  seljsonObject.get("isMailCoolect").toString().equals("1")?true:false);
+			 policy_sub.put("BODY",  seljsonObject.get("isMailCoolect").toString().equals("1")?true:false);
+			 policy_sub.put("ISREGEXPR",  seljsonObject.get("isMailCoolect").toString().equals("1")?true:false);
+			 policy_sub.put("ISRECVDATE",  seljsonObject.get("isMailCoolect").toString().equals("1")?true:false);			 
+			 JSONObject policy_sub_detail = new JSONObject();
+			 policy_sub_detail =  (JSONObject) policy_sub.get("ATTFILE");	 
+			 policy_sub_detail.put("ISANALYZE",  seljsonObject.get("isMailCoolect").toString().equals("1")?true:false);
+			 policy_sub.put("ATTFILE", policy_sub_detail);			 
+			 policy.put("MAILINFO", policy_sub);		 
+			 
+			 System.out.println("MAILINFO ==== " + policy_sub.toString());
+			 
+			 jsonObject.put("POLICYINFO",policyinfo );
+			 jsonObject.put("POLICY",policy );
+			 
+			 System.out.println("POLICY ==== " + jsonObject.toString());
+			 			 
+			 return jsonObject.toString();
+	  	}catch(Exception e) { 
+			logger.info(e.getMessage());
+		}				 
+	  return "";	  	
+  }
+
+  public String pcsecuPolicyEdit(String tmppolicy, String sendpolicy) { 
+	  CommonUtils util = new CommonUtils();
+	  JSONObject seljsonObject = new JSONObject();
+	  
+	  JSONParser parser = new JSONParser(); 
+	  JSONObject jsonObject = new JSONObject();
+	  try {
+		     seljsonObject = (JSONObject) parser.parse(sendpolicy);
+			  
+			 jsonObject = (JSONObject) parser.parse(tmppolicy);
+			 JSONObject policyinfo = new JSONObject();
+			 JSONObject policy = new JSONObject();
+			 		 			 
+			 // 정책 정보
+			 policyinfo = (JSONObject)jsonObject.get("POLICYINFO");
+			 policyinfo.put("NAME",    util.urlEncode( seljsonObject.get("PolicyName") + ""));
+			 policyinfo.put("VERSION", seljsonObject.get("Version"));
+			 policyinfo.put("ID",          seljsonObject.get("policyId"));
+			 
+			 policy = (JSONObject)jsonObject.get("POLICY");			
+			 policy.put("USE",  seljsonObject.get("isPCSecu").toString().equals("1")?true:false);
+			 
+			 jsonObject.put("POLICYINFO",policyinfo ); 
+			 jsonObject.put("POLICY",policy );			 
+			
+			 return jsonObject.toString();
+	  } catch(Exception e) {
+		logger.info(e.getMessage());
+	 }
+	  
+	 return "";
+  }
+  
+  public String updatePolicyEdit(String tmppolicy, String sendpolicy) {
+	  
+	  CommonUtils util = new CommonUtils();
+	  JSONObject seljsonObject = new JSONObject();
+	  
+	  JSONParser parser = new JSONParser(); 
+	  JSONObject jsonObject = new JSONObject();
+	  try {
+		     seljsonObject = (JSONObject) parser.parse(sendpolicy);
+			  
+			 jsonObject = (JSONObject) parser.parse(tmppolicy);
+			 JSONObject policyinfo = new JSONObject();
+			 JSONObject policy = new JSONObject();
+			 		 			 
+			 // 정책 정보
+			 policyinfo = (JSONObject)jsonObject.get("POLICYINFO");
+			 policyinfo.put("NAME",    util.urlEncode( seljsonObject.get("PolicyName") + ""));
+			 policyinfo.put("VERSION", seljsonObject.get("Version"));
+			 policyinfo.put("ID",          seljsonObject.get("policyId"));
+			 
+			 policy = (JSONObject)jsonObject.get("POLICY");			
+             //  업데이트 주소는 변경해야 됨
+			 policy.put("UPDATESERVERIP", "http://10.102.10.208/LiveUpdate");
+			 
+			 jsonObject.put("POLICYINFO",policyinfo ); 
+			 jsonObject.put("POLICY",policy );			 
+			
+			 return jsonObject.toString();
+	  } catch(Exception e) {
+		logger.info(e.getMessage());
+	 }
+	  
+	 return "";
+  }
+	
+  // 삭제 에이전트 조회
+	public ArrayList<Map<String, Object>>  selectUninstallAgent(Map<String, Object> map) throws Exception {		
+		return agentMapper.selectUninstallAgent(map); 
+	}
+	   
+ // 삭제 승인 에이전트명 	
+	public  int  UninstallAgentResult(Map<String, Object> map) throws Exception {
+		CommonUtils util = new CommonUtils();
+		String agentList[]    = map.get("agentlist").toString().split(",");
+		String checkflag     = map.get("checkflag").toString();
+		String cancleresult  = map.get("cancleresult").toString();
+		String command_type  = map.get("command_type").toString();
+		String adminId = map.get("adminId").toString();  
+		TimeUtilLib timeu = new TimeUtilLib(); 
+		String random_guid = "{" + UUID.randomUUID() +  "}";	
+		
+		String result_json = "{\"UNINSTALLTYPE\":\""+checkflag+"\",\"REASON\":\""+ util.urlEncode(cancleresult) +"\","
+				                         +"\"SENDTIME\":\""+ timeu.todaydate("yyyy-MM-dd HH:mm:ss") +"\",\"GUID\":\""+random_guid+"\"}"; 
+		int result = 0;            
+		
+		// 에이전트 해당 결과 전송
+		for(int ioop =0; ioop< agentList.length; ioop++){			
+		   // 에이전트 폴링리스트에 입력
+		   Map<String, Object> params = new HashMap<String, Object>();
+		   params.put("customId", map.get("customId"));
+		   params.put("agentId",   agentList[ioop]);
+		   params.put("sendJson", result_json.toString());
+		   params.put("Type",     command_type );  
+		   params.put("guid",      random_guid);	
+		   params.put("adminId",    adminId);			
+		   params.put("checkflag",   checkflag);			
+		   params.put("cancleresult",   cancleresult);
+		   
+		     
+		   result = agentMapper.AgentPolicyApply(params); 		
+           result =  agentMapper.UninstallAgentResult(params);	 
+		}
+				
+		return result;
+	}		
+	
+	
+	public  int  OfflineAgentDeleteDatabase(Map<String, Object> map) throws Exception {
+		String agentList[]    = map.get("agentlist").toString().split(",");	
+		String adminId = map.get("adminId").toString();
+		String customId = map.get("customId").toString();
+		int result = 0;            
+		
+		// 에이전트 해당 결과 전송
+		for(int ioop =0; ioop< agentList.length; ioop++){	
+			// 에이전트 폴링리스트에 입력
+			   Map<String, Object> params = new HashMap<String, Object>();
+			   params.put("customId", customId);
+			   params.put("agentId",   agentList[ioop]);
+			   params.put("adminId",    adminId);		
+			   result = agentMapper.OfflineAgentDeleteDatabase(params); 	
+			   result = agentMapper.DeleteAgentData(params);			   			   			   			   
+		}
+		return result;
+		
+	}
+	
+	
+	  // 삭제 에이전트 조회
+		public ArrayList<Map<String, Object>>  selectAgentDeleteList(Map<String, Object> map) throws Exception {		
+			return agentMapper.selectAgentDeleteList(map); 
+		}	
+		
+		
+	
+	
+		 
+	
+}

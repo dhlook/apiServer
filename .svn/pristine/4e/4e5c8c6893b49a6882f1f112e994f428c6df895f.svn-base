@@ -1,0 +1,42 @@
+package com.slamdh.apiserver;
+
+public interface AppName {
+
+	String WEB_COOKIE        	= "webCookie";
+    String WEB_CACHE        	= "webCache";
+    String WEBSITE_BLOCK      	= "webBlockLog";
+    String PROCESS_BLOCK      	= "procBlockLog";
+    String PC_SECURE        	= "pcSecuLog";
+    String IP_MONITER           = "ipMonLog";
+    String LIVE_PROCESS        	= "liveProcessInfo";
+    String LIVE_PROCESS_SUB     = "liveProcessSubInfo";
+    String LIVE_NETWORK_STATUS 	= "liveNetworkStatus";
+    String LIVE_SERVICE        	= "liveServiceInfo";
+    String REALTIME_FILE_LOG   	= "realtimeFileLog";
+    String LINK_FILE           	= "linkFileLog";
+    String UNINSTALL           	= "uninstallLog";
+    String SHAREFOLDER         	= "shareFolderLog";
+    String NETWORK             	= "networkInfo";
+    String AUTORUN             	= "autorunLog";
+    String WIN_CMDS            	= "regWinCmds";
+    String RECENT_DOCS         	= "recentDocsLog";
+    String PREFETCH_FILE       	= "prefetchFileLog";
+    String RECYCLEBIN          	= "recyclebinLog";
+    String REG_USB             	= "regUsbInfo";
+    String SYSTEM_ONOFF        	= "systemOnOffInfo";
+    String INTERNET            	= "internetInfo";
+    String DELETE_FILELISTS    	= "deleteFileLists";
+    String JUMPLIST            	= "jumpList";
+    String WEB_BROKEN           = "webBroken";
+    String SHELL_BAGS           = "shellBags";
+    String SHELL_BAG_MRU       	= "shellBagMRU";
+    String WIRELESS            	= "wireless";
+    String WIRELESS_HISTORY   	= "wirelessHistory";
+    String BROWSER_DOWNLOAD     = "browserDownload";
+    String FILE                 = "fileLists";
+    String MAIL                	= "mailInfo";
+    String MAIL_ATTFILE        	= "mailFileInfo";
+    String FILE_CONTENTS        = "fileContents";
+    String REG_USER_PROFILE     = "regUserProfile";
+
+}

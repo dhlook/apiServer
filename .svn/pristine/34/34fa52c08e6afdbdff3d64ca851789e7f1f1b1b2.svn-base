@@ -1,0 +1,9 @@
+package com.slamdh.apiserver.mapper;
+
+import java.util.Map;
+
+public interface ProfileMapper {
+
+	public int insertProfile(Map<String, Object> map)throws Exception ;
+	
+}

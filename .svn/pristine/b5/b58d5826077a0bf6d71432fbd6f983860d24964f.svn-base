@@ -1,0 +1,338 @@
+package com.slamdh.apiserver.service;
+
+import static org.elasticsearch.index.query.QueryBuilders.queryStringQuery;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.StringJoiner;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+import org.apache.commons.lang3.StringUtils;
+import org.elasticsearch.index.query.BoolQueryBuilder;
+import org.elasticsearch.index.query.Operator;
+import org.elasticsearch.index.query.QueryBuilders;
+import org.elasticsearch.index.query.QueryStringQueryBuilder;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.stereotype.Service;
+
+import com.slamdh.apiserver.AppName;
+import com.slamdh.apiserver.Constants;
+import com.slamdh.apiserver.mapper.BlackListMapper;
+
+@Service
+public class CommonService {
+    private final Logger logger = LoggerFactory.getLogger(CommonService.class);
+    
+    //프로퍼티에서 받아서 처리하자.
+    protected int pagesize;
+    protected int scrollPagesize = 50;
+    
+    @Autowired
+	BlackListMapper blackListMapper;
+
+	public String getNgramQuery(String searchKeyword) {
+		
+		String str = "";
+		int ngramSize = 16;
+		String ngramStr = "";
+		
+		searchKeyword = searchKeyword.toLowerCase();
+
+		if (searchKeyword.length() > ngramSize) {
+
+			for (int i = 0; i <= searchKeyword.length() - ngramSize; i++) {
+				ngramStr += "("+reformSearchWord(searchKeyword.substring(i, i + ngramSize)) + ")";
+			}
+
+			str = ngramStr;
+		} else {
+			str = reformSearchWord(searchKeyword);
+		}
+		
+		return str;
+		
+    }
+	
+	public String reformSearchWord(String src) {
+
+        //query_string 예약어 검색어로 인식하도록 예외처리
+        // 예약어 + - = && || > < ! ( ) { } [ ] ^ " ~ * ? : \ /
+        String esReservedRegExp = "[\\+\\-\\=\\>\\<\\!\\(\\)\\{\\}\\[\\]\\^\\~\\?\\/\\\\]|(?:&&)|(?:\\|\\|)";
+        StringBuffer buffer = new StringBuffer();
+        Pattern pattern = Pattern.compile(esReservedRegExp);
+        Matcher m = pattern.matcher(src);
+
+        while (m.find()) {
+            String findStr = m.group();
+            String replaceStr = "";
+            if (StringUtils.isNotBlank(findStr)) {
+                if(findStr.equals("\\")){
+                    replaceStr = "\\\\\\"+findStr;
+                } else {
+                    replaceStr = "\\\\"+findStr;
+                }
+
+                m.appendReplacement(buffer, replaceStr);
+            }
+        }
+        m.appendTail(buffer);
+        
+        return buffer.toString();
+    }
+	
+	
+	public BoolQueryBuilder getAnomalyQuery() {
+		
+		BoolQueryBuilder liveProcessInfo = QueryBuilders.boolQuery()
+				.must(QueryBuilders.termQuery("appName", AppName.LIVE_PROCESS))
+				.should(QueryBuilders.termQuery("isMatchName", 1))
+				.should(QueryBuilders.termQuery("isCodesign", 0))
+				.should(QueryBuilders.termQuery("isHide", 1))
+				.should(QueryBuilders.termQuery("companyName", ""))
+				.minimumShouldMatch(1);
+		
+		BoolQueryBuilder liveProcessSubInfo = QueryBuilders.boolQuery()
+				.must(QueryBuilders.termQuery("appName", AppName.LIVE_PROCESS_SUB))
+				.should(QueryBuilders.termQuery("isCodesign", 0))
+				.should(QueryBuilders.termQuery("companyName", ""))
+				.minimumShouldMatch(1);
+		
+		BoolQueryBuilder liveServiceInfo = QueryBuilders.boolQuery()
+				.must(QueryBuilders.termQuery("appName", AppName.LIVE_SERVICE))
+				.should(QueryBuilders.termQuery("isCodesign", 0))
+				.should(QueryBuilders.termQuery("companyName", ""))
+				.minimumShouldMatch(1);
+		
+		BoolQueryBuilder browserDownload = QueryBuilders.boolQuery()
+				.must(QueryBuilders.termQuery("appName", AppName.BROWSER_DOWNLOAD))
+				.should(QueryBuilders.termQuery("isMatchName", 1))
+				.should(QueryBuilders.termQuery("isCodesign", 0))
+				.should(QueryBuilders.termQuery("isMacro", 1))
+				.should(QueryBuilders.termQuery("companyName", ""))
+				.minimumShouldMatch(1);
+		
+		BoolQueryBuilder recentDocsLog = QueryBuilders.boolQuery()
+//				.must(QueryBuilders.termsQuery("appName", AppName.RECENT_DOCS, AppName.LINK_FILE))
+				.must(QueryBuilders.termsQuery("appName", AppName.RECENT_DOCS))
+				.must(QueryBuilders.termQuery("isMacro", 1));
+		
+		BoolQueryBuilder autorunLog = QueryBuilders.boolQuery()
+				.must(QueryBuilders.termQuery("appName", AppName.AUTORUN))
+				.should(QueryBuilders.termQuery("isMatchName", 1))
+				.should(QueryBuilders.termQuery("isCodesign", 0))
+				.should(QueryBuilders.termQuery("companyName", ""))
+				.minimumShouldMatch(1);
+		
+		BoolQueryBuilder anomalyCntBoolQuery =  QueryBuilders.boolQuery()
+				.should(liveProcessInfo)
+				.should(liveProcessSubInfo)
+				.should(liveServiceInfo)
+				.should(browserDownload)
+				.should(recentDocsLog)
+				.should(autorunLog)
+				.minimumShouldMatch(1);
+		
+		return anomalyCntBoolQuery;
+	}
+	
+	public BoolQueryBuilder getBlackListQuery() {
+		
+		BoolQueryBuilder boolQuery = QueryBuilders.boolQuery();
+		
+		try {
+			Map<String, String> blParam = new HashMap<String, String>();
+			ArrayList<Map<String, String>> blackList = blackListMapper.getBlackList(blParam);
+			
+			for(Map<String, String> m : blackList) {
+				String content = m.get("blackListContents");
+				String[] contentArr = content.split(",");
+				if(m.get("blackListType").toString().equals("1")) {
+					boolQuery.should(QueryBuilders.termsQuery("hostUrl", contentArr));
+				} else if(m.get("blackListType").toString().equals("2")) {
+					boolQuery.should(QueryBuilders.termsQuery("searchKeyword", contentArr));
+				} else if(m.get("blackListType").toString().equals("3")) {
+					boolQuery.should(QueryBuilders.termsQuery("processName", contentArr));
+				}
+			}
+			
+			boolQuery.minimumShouldMatch(1);
+			
+		} catch(Exception e) {
+			logger.info(e.getMessage());
+		}
+		
+		return boolQuery;
+	}
+	
+	
+	public void getFileCheckList(ArrayList<Map<String, Object>> list) {
+		
+		for(Map<String, Object> m : list) {
+			String appName = m.get("appName").toString();
+			boolean isFile = true;
+
+			//브라우저다운로드일경우 확장자로 문서/실행파일을 구별하고 나머지의 경우  AppName으로 구분
+			if (appName.equals(AppName.BROWSER_DOWNLOAD)) {
+				if(m.get("ext") != null && m.get("ext").toString().equals("exe")) {
+					isFile = false;
+				} else {
+					isFile = true;
+				}
+			} else {
+				if(appName.equals(AppName.LIVE_PROCESS) || appName.equals(AppName.LIVE_SERVICE) || appName.equals(AppName.AUTORUN) || appName.equals(AppName.LIVE_PROCESS_SUB)) {
+					// 실행프로세스, 서비스
+					isFile = false;
+				} else if(appName.equals(AppName.RECENT_DOCS) || appName.equals(AppName.LINK_FILE) || appName.equals(AppName.REALTIME_FILE_LOG)) {
+					// 최근열어본문서, 실시간 로그(유출), 자동실행 프로그램
+					isFile = true;
+				}
+			}
+			
+			m.put("isFile", isFile);
+		}
+	}
+	
+
+	public Map<String, Object> searchWordString(String searchStr) {
+		
+		String nGramQuery = StringUtils.EMPTY;
+		String whiteSpaceQuery = StringUtils.EMPTY;
+		String searchWord = StringUtils.EMPTY;
+		
+		if (StringUtils.isNotBlank(searchStr)) {
+			searchWord = searchStr.trim().toLowerCase();
+			nGramQuery = searchWord;
+			whiteSpaceQuery = searchWord;
+			
+			String tempStr = "";
+			
+			tempStr = replaceQueryStr(nGramQuery, 1);
+			
+			if (StringUtils.isNotEmpty(tempStr)) {
+				nGramQuery = tempStr;
+			}
+			
+			tempStr = replaceQueryStr(whiteSpaceQuery, 2);
+			if (StringUtils.isNotEmpty(tempStr)) {
+				whiteSpaceQuery = tempStr;
+			}
+			
+			
+			if (nGramQuery != null) {
+				nGramQuery = new StringJoiner("", "+(", ")").add(nGramQuery).toString();
+			}
+			if (whiteSpaceQuery != null) {
+				whiteSpaceQuery = new StringJoiner("", "+(", ")").add(whiteSpaceQuery).toString();
+			}
+		}
+		
+		Map<String, Object> queryMap = new HashMap<String, Object>();
+		queryMap.put("nGramQuery", nGramQuery);
+		queryMap.put("whiteSpaceQuery", whiteSpaceQuery);
+		
+		if (nGramQuery == null) {
+            queryMap = Collections.emptyMap();
+        }
+		
+		return queryMap;
+	}
+    
+
+	public String replaceQueryStr(String searchWord, int analyzerType) {
+
+	    String tempStr = "";
+	    int ngramSize = 16;
+	
+	    // 괄호 앞뒤 공백 추가하여 단어만 추출
+	    if (searchWord.contains("(")) {
+	        searchWord = searchWord.replaceAll("\\(", " ( ");
+	    }
+	    if (searchWord.contains(")")) {
+	        searchWord = searchWord.replaceAll("\\)", " ) ");
+	    }
+	
+	    String[] strArr = searchWord.split(" ");
+	
+	    for (String str : strArr) {
+	        if (!str.replaceAll("\\s", "").equals("")) {
+	
+	            // ngram index 설정인 16자 이상의 문자일 경우 한문자씩 증가하여 AND 조건으로 붙임
+	            if (analyzerType == 1) {
+	
+	                String ngramStr = "";
+	                if (str.length() > ngramSize) {
+	
+	                    for (int i = 0; i <= str.length() - ngramSize; i++) {
+	                        ngramStr += reformSearchWord(str.substring(i, i + ngramSize)) + " AND ";
+	                    }
+	
+	                    // 마지막 AND 조건 제거
+	                    ngramStr = "(" + ngramStr.substring(0, ngramStr.lastIndexOf(" AND ")) + ")";
+	
+	                    str = ngramStr;
+	                } else {
+	                    str = reformSearchWord(str);
+	                }
+	
+	            } else {
+	                // whitespace일 경우 단어 뒤에 * 붙임
+	                str = "*" + reformSearchWord(str) + "*";
+	            }
+	
+	            // 각 단어 사이를 띄움
+	            tempStr += str + " ";
+	        }
+	    }
+	
+	    if (StringUtils.isNotEmpty(tempStr)) {
+	        tempStr = tempStr.substring(0, tempStr.length() - 1);
+	    }
+	
+	    return tempStr;
+	}
+	
+	public BoolQueryBuilder makeSearchBoolQuery(Map<String, Object> queryMap, BoolQueryBuilder searchBoolQuery) {
+        String nGramQuery = (String) queryMap.get("nGramQuery");
+        String whiteSpaceQuery = (String) queryMap.get("whiteSpaceQuery");
+
+        BoolQueryBuilder boolSearchQuery = new BoolQueryBuilder();
+
+        QueryStringQueryBuilder nGramQueryBuilder = queryStringQuery(nGramQuery).defaultOperator(Operator.OR);
+        QueryStringQueryBuilder whiteSpaceQueryBuilder = queryStringQuery(whiteSpaceQuery).defaultOperator(Operator.OR);
+
+
+        for (String field : Constants.NGRAM_FIELDS) {
+            nGramQueryBuilder.field(field);
+        }
+        for (String field : Constants.WHITESPACE_FIELDS) {
+            whiteSpaceQueryBuilder.field(field);
+        }
+
+        // Master BoolQuery
+        boolSearchQuery.should(nGramQueryBuilder).should(whiteSpaceQueryBuilder).minimumShouldMatch(1);
+        searchBoolQuery.must(boolSearchQuery);
+        
+        return searchBoolQuery;
+
+    }
+	
+	public BoolQueryBuilder searchCondition(String searchStr) {
+        BoolQueryBuilder searchBoolQuery = QueryBuilders.boolQuery();
+
+        if (StringUtils.isNotBlank(searchStr)) {
+            Map<String, Object> searchWordMap = searchWordString(searchStr);
+
+            if (!searchWordMap.isEmpty()) {
+                searchBoolQuery = makeSearchBoolQuery(searchWordMap, searchBoolQuery);
+            }
+        }
+
+        return searchBoolQuery;
+    }
+	
+}

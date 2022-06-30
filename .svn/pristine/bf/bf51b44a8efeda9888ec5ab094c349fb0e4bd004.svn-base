@@ -1,0 +1,125 @@
+package com.slamdh.apiserver.utils;
+
+import org.neo4j.driver.v1.AuthTokens;
+import org.neo4j.driver.v1.Driver;
+import org.neo4j.driver.v1.GraphDatabase;
+import org.neo4j.driver.v1.Session;
+import org.neo4j.driver.v1.Transaction;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
+
+
+@Component
+public class Neo4jUtil {
+	
+	static final Logger logger = LoggerFactory.getLogger(Neo4jUtil.class);
+	
+	@Value("${neo4j.uri}")
+	String uri = null;
+	@Value("${neo4j.bolt-port}")
+	String boltPort = null;
+	@Value("${neo4j.rest-port}")
+	String restPoty = null;
+	@Value("${neo4j.id}")
+	String id;
+	@Value("${neo4j.password}")
+	String password;
+	
+
+	public Driver getNeo4jDriver() {
+        Driver driver = null;
+        try {
+            driver = GraphDatabase.driver(uri, AuthTokens.basic(id, password));
+        } catch (Exception e) {
+            logger.error("neo4j", e);
+        }
+        return driver;
+    }
+
+    public Session getNeo4jSession(Driver driver) {
+        Session session = null;
+
+        try {
+            if (driver != null) {
+                session = driver.session();
+            }
+        } catch (Exception e) {
+            logger.error("neo4j", e);
+        }
+        return session;
+    }
+
+    public Transaction getNeo4jTransaction(Session session) {
+        Transaction transaction = null;
+        try {
+            if (session != null) {
+                transaction = session.beginTransaction();
+            }
+        } catch (Exception e) {
+            logger.error("neo4j", e);
+        }
+        return transaction;
+    }
+
+    public boolean closeNeo4j(Driver driver, Session session, Transaction transaction) {
+        return closeNeo4j(driver, session, transaction, true);
+    }
+
+    public boolean closeNeo4j(Driver driver, Session session, Transaction transaction, boolean isSuccess) {
+        boolean result1 = closeNeo4jTransaction(transaction, isSuccess);
+        boolean result2 = closeNeo4jSession(session);
+        boolean result3 = closeNeo4jDriver(driver);
+
+        return result1 && result2 && result3;
+    }
+
+    public boolean closeNeo4jTransaction(Transaction transaction, boolean isSuccess) {
+        boolean result = false;
+        try {
+            if (transaction != null) {
+                if (isSuccess) {
+                    transaction.success();
+                } else {
+                    transaction.failure();
+                }
+                transaction.close();
+                transaction = null;
+            }
+            result = true;
+        } catch (Exception e) {
+            logger.error("neo4j", e);
+        }
+        return result;
+    }
+
+    public boolean closeNeo4jSession(Session session) {
+        boolean result = false;
+        try {
+            if (session != null) {
+                session.close();
+                session = null;
+            }
+            result = true;
+        } catch (Exception e) {
+            logger.error("neo4j", e);
+        }
+        return result;
+    }
+
+    public boolean closeNeo4jDriver(Driver driver) {
+        boolean result = false;
+        try {
+            if (driver != null) {
+                driver.close();
+                driver = null;
+            }
+            result = true;
+        } catch (Exception e) {
+            logger.error("neo4j", e);
+        }
+        return result;
+    }
+	
+}
